@@ -247,6 +247,71 @@
       { value: 'Diğer', label: '📦 Diğer' }
     ];
 
+    // ⚙️ VARSAYILAN SİSTEM YÖNETİM PANELİ AYARLARI (E-Tablo İle Tam Senkronize)
+    const DEFAULT_SETTINGS = {
+      appTitle: 'Hâre',
+      appSubtitle: 'İnsani Yardım Halkası',
+      orgDescription: 'Hayır ve İyilikte Yardımlaşma Topluluğu',
+      orgMotto: '“İyilik ve takvâda (sorumluluk bilincinde) yardımlaşın...” (Mâide, 2)',
+      defaultCity: 'Kayseri',
+      defaultDistrict: '',
+      currencySymbol: '₺',
+      orgIban: '',
+      orgIbanHolder: '',
+      announcementActive: false,
+      announcementType: 'info', // 'info' | 'warning' | 'urgent'
+      announcementTitle: '',
+      announcementText: '',
+      defaultPin: '1453',
+      autoSyncIntervalSec: 30,
+      duplicateCheckEnabled: true,
+      forcePrivacyOnStart: false,
+      membersCanViewKasa: true,
+      membersCanViewDonors: true,
+      membersCanEditAids: false,
+      membersCanManageKasa: false,
+      maintenanceMode: false,
+      photoQualityPreset: 'hd', // 'ultra' | 'hd' | 'eco'
+      maxPhotosPerAid: 3,
+      autoStatusOnDeliveryPhoto: true,
+      customCategories: [],
+      disabledDefaultCategories: [],
+      receiptHeader: '🌿 *HÂRE İNSANİ YARDIM HALKASI*',
+      receiptFooter: 'Emanetiniz ihtiyaç sahibi yetim ve mazlum ailelerimize ulaştırılacaktır. Rabbimiz hayrınızı ve niyetinizi dergâh-ı izzetinde makbul eylesin, kazancınıza bereket, hanenize afiyet ihsan eylesin.',
+      shareCardFooter: '_Hâre İnsani Yardım Halkası_',
+      logsClearedAt: 0,
+      deletedLogKeys: [],
+      memberRolesMap: {},
+      memberPermsMap: {}
+    };
+
+    function loadCachedSettings() {
+      try {
+        var raw = localStorage.getItem('hare_cached_settings');
+        if (raw) {
+          var parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === 'object') {
+            return Object.assign({}, DEFAULT_SETTINGS, parsed);
+          }
+        }
+      } catch(e) {}
+      return Object.assign({}, DEFAULT_SETTINGS);
+    }
+
+    function getAllEmanetCategories() {
+      var st = (typeof state !== 'undefined' && state.settings) ? state.settings : DEFAULT_SETTINGS;
+      var disabled = Array.isArray(st.disabledDefaultCategories) ? st.disabledDefaultCategories : [];
+      var base = EMANET_CATEGORIES.filter(function(c) { return !disabled.includes(c.value); });
+      var custom = Array.isArray(st.customCategories) ? st.customCategories : [];
+      var combined = base.slice();
+      custom.forEach(function(cc) {
+        if (cc && cc.value && !combined.some(function(x) { return x.value === cc.value; })) {
+          combined.push({ value: cc.value, label: cc.label || ('📌 ' + cc.value) });
+        }
+      });
+      return combined;
+    }
+
     const LEGACY_CATEGORY_MAP = {
       'Gıda / Erzak (Yiyecek)': 'Gıda / Erzak',
       'Nakit / Sadaka (Para)': 'Nakit Destek',
@@ -280,11 +345,14 @@
       return res;
     }
 
-    // 📸 YÜKSEK KALİTELİ (HD) AKILLI FOTOĞRAF İŞLEME MOTORU (1280px HD + Google E-Tablo Hücre Sınırı Korumalı)
+    // 📸 YÜKSEK KALİTELİ (HD) AKILLI FOTOĞRAF İŞLEME MOTORU (Yönetici Paneli Kalite Ayarı + E-Tablo Hücre Korumalı)
     function compressPhotoHD(img, isDelivery) {
-      var targetDim = 1280;
-      var quality = 0.85;
-      var maxAllowedBase64Len = 15800; // 3 fotoğraf tek E-Tablo hücresinde (<50.000 karakter) güvenle saklanır
+      var st = (typeof state !== 'undefined' && state.settings) ? state.settings : DEFAULT_SETTINGS;
+      var preset = st.photoQualityPreset || 'hd';
+      var targetDim = preset === 'ultra' ? 1440 : (preset === 'eco' ? 960 : 1280);
+      var quality = preset === 'ultra' ? 0.88 : (preset === 'eco' ? 0.75 : 0.85);
+      var maxPhotos = Math.max(1, Number(st.maxPhotosPerAid) || 3);
+      var maxAllowedBase64Len = Math.min(22000, Math.floor(47500 / maxPhotos));
       var resultDataUrl = '';
 
       for (var attempt = 0; attempt < 5; attempt++) {
@@ -311,7 +379,7 @@
           break;
         }
         // Yalnızca Google E-Tablo 50.000 karakter hücre sınırını aşma riski varsa kademeli optimize et
-        quality = Math.max(0.68, quality - 0.05);
+        quality = Math.max(0.65, quality - 0.05);
         targetDim = Math.round(targetDim * 0.86);
       }
 
@@ -321,16 +389,107 @@
       return resultDataUrl;
     }
 
-        // =========================================================================
-    // 🛡️ YETKİ VE AKTİFLİK KONTROL YARDIMCILARI
     // =========================================================================
+    // 🛡️ GELİŞMİŞ EKİP YETKİ, ROL VE AKTİFLİK KONTROL MOTORU
+    // =========================================================================
+    const PERMISSION_DEFINITIONS = [
+      { key: 'canEditAids', label: '✏️ Hane Düzenleme & Silme', desc: 'Mevcut haneleri düzenleyebilir ve silebilir' },
+      { key: 'canManageKasa', label: '🗳️ Sandık (Kasa) Yönetimi', desc: 'Kasa hareketlerini düzenleyebilir ve silebilir' },
+      { key: 'canManageDonors', label: '🤝 Hayırsever Yönetimi', desc: 'Hayırsever kartlarını düzenleyebilir ve silebilir' },
+      { key: 'canViewKasa', label: '👁️ Genel Sandık Görme', desc: 'Genel sandık bakiyesini ve hareketlerini görebilir' },
+      { key: 'canViewDonors', label: '👁️ Hayırseverleri Görme', desc: 'Hayırseverler sekmesini ve hayır defterini görebilir' },
+      { key: 'canViewLogs', label: '📜 İşlem Günlüğü (Log) Görme', desc: 'Sistem işlem geçmişini (logları) inceleyebilir' },
+      { key: 'canExportData', label: '📊 Excel / Rapor İndirme', desc: 'Haneler ve kasa tablolarını Excel CSV indirebilir' }
+    ];
+
+    function getMemberEffectiveRole(user) {
+      if (!user) return 'member';
+      var uId = String(user.id || '').trim();
+      if (uId === '1' || String(user.name || '').toLowerCase().trim() === 'muhammet') return 'admin';
+      var st = (typeof state !== 'undefined' && state.settings) ? state.settings : null;
+      if (st && st.memberRolesMap && st.memberRolesMap[uId]) {
+        return st.memberRolesMap[uId];
+      }
+      var r = String(user.role || '').toLowerCase().trim();
+      if (r === 'admin' || r === 'yonetici' || r === 'yönetici' || r === 'emanetci' || r === 'emanetçi') return 'admin';
+      if (r === 'co_admin' || r === 'yardimci' || r === 'koordinator') return 'co_admin';
+      if (r === 'treasurer' || r === 'kasa' || r === 'sandik') return 'treasurer';
+      return 'member';
+    }
+
     function checkIsAdmin(user) {
       if (!user) return false;
-      var role = String(user.role || '').toLowerCase().trim();
-      if (role === 'admin' || role === 'yonetici' || role === 'yönetici' || role === 'emanetci' || role === 'emanetçi') {
-        return true;
+      return getMemberEffectiveRole(user) === 'admin';
+    }
+
+    function getRoleMeta(user) {
+      var role = getMemberEffectiveRole(user);
+      if (role === 'admin') {
+        return { code: 'admin', title: '👑 Baş Emanetçi (Yönetici)', shortTitle: '👑 Yönetici', badgeClass: 'bg-emerald-100 text-emerald-900 border border-emerald-300' };
       }
-      if (String(user.id).trim() === '1' || String(user.name).toLowerCase().trim() === 'muhammet') {
+      if (role === 'co_admin') {
+        return { code: 'co_admin', title: '🛡️ Yardımcı Yönetici', shortTitle: '🛡️ Yrd. Yönetici', badgeClass: 'bg-indigo-100 text-indigo-900 border border-indigo-300' };
+      }
+      if (role === 'treasurer') {
+        return { code: 'treasurer', title: '💼 Kasa & Emanet Sorumlusu', shortTitle: '💼 Kasa Sorumlusu', badgeClass: 'bg-amber-100 text-amber-900 border border-amber-300' };
+      }
+      return { code: 'member', title: '🤝 Saha Gönüllüsü', shortTitle: '🤝 Gönüllü', badgeClass: 'bg-slate-100 text-slate-700 border border-slate-200' };
+    }
+
+    function getRoleDefaultPermissions(roleCode) {
+      if (roleCode === 'admin') {
+        return { canEditAids: true, canManageKasa: true, canManageDonors: true, canViewKasa: true, canViewDonors: true, canViewLogs: true, canExportData: true };
+      }
+      if (roleCode === 'co_admin') {
+        return { canEditAids: true, canManageKasa: true, canManageDonors: true, canViewKasa: true, canViewDonors: true, canViewLogs: true, canExportData: true };
+      }
+      if (roleCode === 'treasurer') {
+        return { canEditAids: false, canManageKasa: true, canManageDonors: true, canViewKasa: true, canViewDonors: true, canViewLogs: false, canExportData: true };
+      }
+      var st = (typeof state !== 'undefined' && state.settings) ? state.settings : DEFAULT_SETTINGS;
+      return {
+        canEditAids: Boolean(st.membersCanEditAids),
+        canManageKasa: Boolean(st.membersCanManageKasa),
+        canManageDonors: false,
+        canViewKasa: st.membersCanViewKasa !== false,
+        canViewDonors: st.membersCanViewDonors !== false,
+        canViewLogs: false,
+        canExportData: false
+      };
+    }
+
+    function getMemberEffectivePermissions(user) {
+      if (!user) return getRoleDefaultPermissions('member');
+      var role = getMemberEffectiveRole(user);
+      if (role === 'admin') return getRoleDefaultPermissions('admin');
+      var base = getRoleDefaultPermissions(role);
+      var uId = String(user.id || '').trim();
+      var st = (typeof state !== 'undefined' && state.settings) ? state.settings : null;
+      var customFromMap = (st && st.memberPermsMap && st.memberPermsMap[uId]) ? st.memberPermsMap[uId] : {};
+      var customFromUser = (user.permissions && typeof user.permissions === 'object') ? user.permissions : {};
+      return Object.assign({}, base, customFromUser, customFromMap);
+    }
+
+    function hasPermission(permKey, userObj) {
+      var u = userObj || (typeof state !== 'undefined' ? state.currentUser : null);
+      if (!u) return false;
+      if (checkIsAdmin(u)) return true;
+      // Canlı üye listesinden güncel kaydı bul
+      if (typeof state !== 'undefined' && Array.isArray(state.members)) {
+        var liveMember = state.members.find(function(m) {
+          return String(m.id).trim() === String(u.id).trim() || String(m.name || '').toLowerCase().trim() === String(u.name || '').toLowerCase().trim();
+        });
+        if (liveMember) u = liveMember;
+      }
+      if (checkIsAdmin(u)) return true;
+      var perms = getMemberEffectivePermissions(u);
+      return Boolean(perms[permKey]);
+    }
+
+    function isWriteBlockedByMaintenance() {
+      var st = (typeof state !== 'undefined' && state.settings) ? state.settings : DEFAULT_SETTINGS;
+      if (st.maintenanceMode && !checkIsAdmin(state.currentUser)) {
+        showToast('🔒 Sistem şu an yönetici tarafından bakım (salt-okunur) moduna alınmıştır.');
         return true;
       }
       return false;
@@ -505,7 +664,12 @@
       editPhotos: [],
       kasaCategoryFilter: 'Tümü',
       kasaQuickFilter: 'tumu',
-      kasaSearchQuery: ''
+      kasaSearchQuery: '',
+      settings: loadCachedSettings(),
+      adminPanelSection: 'tumu', // 'tumu' | 'kurum' | 'kategoriler' | 'guvenlik' | 'medya' | 'veritabani'
+      viewingAppsScriptModal: false,
+      newMemberPermsDraft: null,
+      editMemberPermsDraft: null
     };
 
     // =========================================================================
@@ -842,36 +1006,66 @@
               state.budget = mergeSafeList(state.budget, data.budget, false);
               saveCacheItem('hare_cached_budget', state.budget);
             }
+            // ⚙️ E-Tablo Sistem Ayarlarını Çözümle (Hem 'Ayarlar' sayfasından hem 'Devirler' sistem köprüsünden)
+            var incomingSettings = null;
+            if (data.settings && typeof data.settings === 'object' && Object.keys(data.settings).length > 0) {
+              incomingSettings = Object.assign({}, data.settings);
+            }
             if (Array.isArray(data.transfers)) {
-              state.transfers = mergeSafeList(state.transfers, data.transfers, false);
+              var sysRow = data.transfers.find(function(t) { return t && String(t.id).trim() === '__HARE_SYS_CONFIG__'; });
+              if (sysRow && sysRow.desc) {
+                try {
+                  var parsedSys = JSON.parse(sysRow.desc);
+                  if (parsedSys && typeof parsedSys === 'object') {
+                    incomingSettings = Object.assign({}, parsedSys, incomingSettings || {});
+                  }
+                } catch(e) {}
+              }
+              var realTransfers = data.transfers.filter(function(t) { return t && String(t.id).trim() !== '__HARE_SYS_CONFIG__'; });
+              state.transfers = mergeSafeList(state.transfers, realTransfers, false);
               saveCacheItem('hare_cached_transfers', state.transfers);
+            }
+            if (incomingSettings) {
+              state.settings = Object.assign({}, DEFAULT_SETTINGS, state.settings, incomingSettings);
+              saveCacheItem('hare_cached_settings', state.settings);
             }
             if (Array.isArray(data.donors)) {
               state.donors = mergeSafeList(state.donors, data.donors, false);
               saveCacheItem('hare_cached_donors', state.donors);
             }
             if (Array.isArray(data.members) && data.members.length > 0) {
+              var rolesMap = (state.settings && state.settings.memberRolesMap) ? state.settings.memberRolesMap : {};
+              var permsMap = (state.settings && state.settings.memberPermsMap) ? state.settings.memberPermsMap : {};
               state.members = data.members.filter(function(m) { return !isIdDeleted(m.id); }).map(function(m) {
+                var mId = String(m.id || '').trim();
+                var resolvedRole = rolesMap[mId] || (checkIsAdmin(m) ? 'admin' : (m.role || 'member'));
+                var resolvedPerms = Object.assign({}, (m.permissions && typeof m.permissions === 'object' ? m.permissions : {}), permsMap[mId] || {});
                 return {
-                  id: String(m.id || '').trim(),
+                  id: mId,
                   name: m.name || '',
                   phone: m.phone || '',
                   profession: m.profession || '',
-                  role: checkIsAdmin(m) ? 'admin' : 'member',
-                  pin: m.pin ? String(m.pin).trim() : '1453',
+                  role: resolvedRole,
+                  permissions: resolvedPerms,
+                  pin: m.pin ? String(m.pin).trim() : (state.settings.defaultPin || '1453'),
                   active: parseActive(m.active)
                 };
               });
               try { localStorage.setItem('hare_cached_members', JSON.stringify(state.members)); } catch(e) {}
             }
           }
-          if (Array.isArray(data.logs)) {
-            // Sunucudan gelen logları ve son yerel logları birleştirip en yeniden en eskiye sırala
+          if (Array.isArray(data.logs) && !state.isPushing) {
+            var clearedAt = Number((state.settings && state.settings.logsClearedAt) || 0);
+            var delKeys = Array.isArray(state.settings && state.settings.deletedLogKeys) ? state.settings.deletedLogKeys : [];
             var logMap = {};
             state.logs.concat(data.logs).forEach(function(l) {
               if (l && l.details) {
-                var key = (l.date || '') + '_' + l.details;
-                if (!logMap[key]) logMap[key] = l;
+                var lKey = getLogUniqueKey(l);
+                if (delKeys.includes(lKey) || isIdDeleted(l.id)) return;
+                var lTs = l.id ? Number(String(l.id).replace(/[^0-9]/g, '')) : 0;
+                if (clearedAt > 0 && lTs > 0 && lTs <= clearedAt) return;
+                var dedupKey = (l.date || '') + '_' + l.details + '_' + (l.author || '');
+                if (!logMap[dedupKey]) logMap[dedupKey] = l;
               }
             });
             var combined = Object.values(logMap);
@@ -881,6 +1075,7 @@
               return tB - tA;
             });
             state.logs = combined;
+            saveCacheItem('hare_cached_logs', state.logs);
           }
         }
       } catch (err) {
@@ -888,6 +1083,7 @@
         console.warn('Veri eşitleme uyarısı:', err && err.message ? err.message : err);
       } finally {
         state.isSyncing = false;
+        state.lastSyncTime = getTurkeyDateTime();
         checkAndPerformAutoDailyBackup();
         if (!isTyping && !isBusyWithForm && !document.hidden) {
           render();
@@ -895,20 +1091,48 @@
       }
     }
 
-    async function pushToGoogleSheet(actionName, actionDetails) {
+    function getLogUniqueKey(l) {
+      if (!l) return '';
+      return String(l.id || '').trim() + '|' + String(l.date || '').trim() + '|' + String(l.details || '').trim();
+    }
+
+    async function pushToGoogleSheet(actionName, actionDetails, options) {
       if (!state.currentUser) return;
-      
-      // Anında yerel günlük kaydı ekle (Silinenlerin ve yapılan işlemlerin anında Günlük'te görünmesini sağlar)
+      var opts = options || {};
       var now = new Date();
       var dateStr = getTurkeyDateTime(now);
-      var newLog = {
-        id: 'log-' + now.getTime(),
-        date: dateStr,
-        author: state.currentUser.name,
-        action: actionName || 'Güncelleme',
-        details: actionDetails || 'Kayıt güncellendi.'
-      };
-      state.logs.unshift(newLog);
+      var logEntryPayload = null;
+
+      if (!opts.skipLog && actionName) {
+        var newLog = {
+          id: 'log-' + now.getTime(),
+          date: dateStr,
+          author: state.currentUser.name,
+          action: actionName || 'Güncelleme',
+          details: actionDetails || 'Kayıt güncellendi.'
+        };
+        state.logs.unshift(newLog);
+        logEntryPayload = {
+          date: dateStr,
+          author: state.currentUser.name,
+          action: actionName || 'Güncelleme',
+          details: actionDetails || 'Kayıt güncellendi.'
+        };
+      }
+
+      // Üye rol ve yetki haritasını settings içine de senkronize et (E-Tablo tam uyumluluk garantisi)
+      if (!state.settings) state.settings = Object.assign({}, DEFAULT_SETTINGS);
+      if (!state.settings.memberRolesMap) state.settings.memberRolesMap = {};
+      if (!state.settings.memberPermsMap) state.settings.memberPermsMap = {};
+      (state.members || []).forEach(function(m) {
+        var mId = String(m.id || '').trim();
+        if (mId) {
+          state.settings.memberRolesMap[mId] = m.role || 'member';
+          if (m.permissions && typeof m.permissions === 'object') {
+            state.settings.memberPermsMap[mId] = m.permissions;
+          }
+        }
+      });
 
       // Yerel önbelleği anında güncelle (Çevrimdışı ve yenileme anında verilerin kaybolmasını engeller)
       saveCacheItem('hare_cached_aids', state.aids);
@@ -917,6 +1141,7 @@
       saveCacheItem('hare_cached_donors', state.donors);
       saveCacheItem('hare_cached_members', state.members);
       saveCacheItem('hare_cached_logs', state.logs);
+      saveCacheItem('hare_cached_settings', state.settings);
 
       state.isSyncing = true;
       state.isPushing = true;
@@ -929,6 +1154,7 @@
           controller = new AbortController();
           timeoutId = setTimeout(function() { controller.abort(); }, 12000);
         }
+        var maxPhotos = Math.max(1, Number(state.settings.maxPhotosPerAid) || 3);
         var aidsForServer = (state.aids || []).map(function(a) {
           var copy = Object.assign({}, a);
           var basePhotos = Array.isArray(a.photos) ? a.photos.slice() : [];
@@ -938,25 +1164,42 @@
             }
             return dp;
           }) : [];
-          copy.photos = basePhotos.concat(delPhotos).slice(0, 3);
+          copy.photos = basePhotos.concat(delPhotos).slice(0, maxPhotos);
           return copy;
         });
+
+        // Sistem ayarlarını hem doğrudan `settings` alanı olarak hem de mevcut Apps Script ile %100 uyumlu sistem satırı olarak gönder
+        var cleanTransfers = (state.transfers || []).filter(function(t) { return t && String(t.id).trim() !== '__HARE_SYS_CONFIG__'; });
+        var sysConfigTransferRow = {
+          id: '__HARE_SYS_CONFIG__',
+          from: '__SYS__',
+          to: '__SYS__',
+          amount: 0,
+          channel: 'sys',
+          desc: JSON.stringify(state.settings),
+          date: dateStr,
+          status: 'sys_config',
+          approvedAt: '',
+          author: state.currentUser.name
+        };
+        var transfersForServer = cleanTransfers.concat([sysConfigTransferRow]);
+
+        var bodyPayload = {
+          token: API_SECRET,
+          aids: aidsForServer,
+          budget: state.budget,
+          transfers: transfersForServer,
+          donors: state.donors,
+          members: state.members,
+          settings: state.settings,
+          overwriteLogs: Boolean(opts.overwriteLogs),
+          logs: opts.overwriteLogs ? state.logs : undefined,
+          logEntry: logEntryPayload
+        };
+
         var pushOpts = {
           method: 'POST',
-          body: JSON.stringify({
-            token: API_SECRET,
-            aids: aidsForServer,
-            budget: state.budget,
-            transfers: state.transfers,
-            donors: state.donors,
-            members: state.members,
-            logEntry: {
-              date: dateStr,
-              author: state.currentUser.name,
-              action: actionName || 'Güncelleme',
-              details: actionDetails || 'Kayıt güncellendi.'
-            }
-          })
+          body: JSON.stringify(bodyPayload)
         };
         if (controller) pushOpts.signal = controller.signal;
         await fetch(state.sheetUrl, pushOpts);
@@ -967,6 +1210,7 @@
       } finally {
         state.isPushing = false;
         state.isSyncing = false;
+        state.lastSyncTime = getTurkeyDateTime();
         render();
       }
     }
@@ -1216,8 +1460,9 @@
       var item = state.aids.find(function(a) { return String(a.id).trim() === targetId; });
       if (!item) return;
 
-      var text = '🌿 *HÂRE İYİLİK VE EMANET KARTI*\n' +
-        '_“İyilik ve takvâda (sorumluluk bilincinde) yardımlaşın...” (Mâide, 2)_\n\n' +
+      var st = state.settings || DEFAULT_SETTINGS;
+      var text = '🌿 *' + (st.appTitle || 'HÂRE').toUpperCase() + ' İYİLİK VE EMANET KARTI*\n' +
+        '_' + (st.orgMotto || '“İyilik ve takvâda (sorumluluk bilincinde) yardımlaşın...” (Mâide, 2)') + '_\n\n' +
         '👤 *Hane / İhtiyaç Sahibi:* ' + item.name + '\n' +
         '📍 *Bölge:* ' + item.neighborhood + ' - ' + item.district + (item.city ? ' / ' + item.city : '') + '\n' +
         '🏠 *Adres:* ' + item.address + '\n' +
@@ -1225,7 +1470,7 @@
         '⚠️ *Durum:* ' + item.status + '\n' +
         '📝 *Not:* ' + item.notes + '\n' +
         '🗺️ *Konum:* ' + (item.mapsUrl || 'Eklenmedi') + '\n\n' +
-        '_Hâre İnsani Yardım Halkası_';
+        (st.shareCardFooter || '_Hâre İnsani Yardım Halkası_');
 
       var appUrl = 'whatsapp://send?text=' + encodeURIComponent(text);
       var webUrl = 'https://api.whatsapp.com/send?text=' + encodeURIComponent(text);
@@ -1546,13 +1791,13 @@
                (d.email || '').toLowerCase().includes(q) ||
                (qDigits.length >= 3 && dPhone.includes(qDigits));
       });
-      var isAdmin = state.currentUser && state.currentUser.role === 'admin';
+      var canManageDonors = hasPermission('canManageDonors');
       if (filtered.length === 0) return '<div class="bg-white p-6 rounded-2xl text-center text-xs text-slate-400 font-semibold border border-slate-200">Hayırsever bulunamadı.</div>';
 
       return filtered.map(function(d) {
         var cleanP = cleanPhone(d.phone);
         var stats = calculateDonorStats(d.name);
-        var adminBtns = isAdmin ? '<div class="flex space-x-1"><button data-id="' + esc(d.id) + '" onclick="openEditDonor(this.getAttribute(\'data-id\'))" class="text-[10px] text-emerald-800 font-bold hover:bg-slate-100 px-2 py-1 rounded border border-slate-200">✏️ Düzenle</button><button data-id="' + esc(d.id) + '" onclick="deleteDonor(this.getAttribute(\'data-id\'))" class="text-[10px] text-rose-500 font-bold hover:bg-rose-50 px-2 py-1 rounded border border-rose-200">Sil</button></div>' : '';
+        var adminBtns = canManageDonors ? '<div class="flex space-x-1"><button data-id="' + esc(d.id) + '" onclick="openEditDonor(this.getAttribute(\'data-id\'))" class="text-[10px] text-emerald-800 font-bold hover:bg-slate-100 px-2 py-1 rounded border border-slate-200">✏️ Düzenle</button><button data-id="' + esc(d.id) + '" onclick="deleteDonor(this.getAttribute(\'data-id\'))" class="text-[10px] text-rose-500 font-bold hover:bg-rose-50 px-2 py-1 rounded border border-rose-200">Sil</button></div>' : '';
         var contactBtns = '<div class="flex flex-wrap gap-1.5 pt-1">';
         if (cleanP) {
           contactBtns += '<button type="button" data-phone="' + esc(cleanP) + '" onclick="callPhone(this.getAttribute(\'data-phone\'))" class="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center space-x-1 active:scale-95 transition-all"><span>📞 ' + (state.privacyMode ? esc(maskPhone(cleanP)) : 'Ara') + '</span></button>';
@@ -1588,32 +1833,49 @@
     }
 
     function renderLogsListHTML() {
-      var q = (state.logSearchQuery || '').toLowerCase();
-      var sortedLogs = state.logs.slice().reverse(); // En son yapılan işlem en üstte görünsün
-      var filtered = sortedLogs.filter(function(l) {
-        return (l.author || '').toLowerCase().includes(q) || (l.action || '').toLowerCase().includes(q) || (l.details || '').toLowerCase().includes(q);
+      var q = (state.logSearchQuery || '').toLowerCase().trim();
+      var isOnlyAdmin = checkIsAdmin(state.currentUser);
+      var filtered = (state.logs || []).filter(function(l) {
+        if (!l) return false;
+        if (!q) return true;
+        return (l.author || '').toLowerCase().includes(q) || (l.action || '').toLowerCase().includes(q) || (l.details || '').toLowerCase().includes(q) || (l.date || '').toLowerCase().includes(q);
       });
-      if (filtered.length === 0) return '<div class="bg-white p-6 rounded-2xl text-center text-xs text-slate-400 font-semibold border border-slate-200">İşlem geçmişi bulunamadı.</div>';
+      if (filtered.length === 0) return '<div class="bg-white p-6 rounded-2xl text-center text-xs text-slate-400 font-semibold border border-slate-200">İşlem geçmişi (log) kaydı bulunamadı.</div>';
 
       return filtered.map(function(l) {
         var badgeColor = 'bg-slate-100 text-slate-700 border-slate-200';
-        var act = l.action || '';
-        if (act.includes('Eklendi') || act.includes('Girişi')) badgeColor = 'bg-emerald-50 text-emerald-800 border-emerald-200';
-        else if (act.includes('Silindi')) badgeColor = 'bg-rose-50 text-rose-800 border-rose-200';
-        else if (act.includes('Güncellendi') || act.includes('Düzenlendi') || act.includes('Durum')) badgeColor = 'bg-amber-50 text-amber-800 border-amber-200';
+        var act = l.action || 'İşlem';
+        if (act.includes('Eklendi') || act.includes('Girişi') || act.includes('Onaylandı')) badgeColor = 'bg-emerald-50 text-emerald-800 border-emerald-200';
+        else if (act.includes('Silindi') || act.includes('Reddedildi') || act.includes('Temizlendi')) badgeColor = 'bg-rose-50 text-rose-800 border-rose-200';
+        else if (act.includes('Güncellendi') || act.includes('Düzenlendi') || act.includes('Durum') || act.includes('Ayar')) badgeColor = 'bg-amber-50 text-amber-800 border-amber-200';
 
-        return '<div class="bg-white p-3.5 rounded-2xl border border-slate-200 text-xs shadow-sm space-y-1">' +
-          '<div class="flex justify-between items-center"><span class="font-extrabold px-2 py-0.5 rounded-md border text-[10px] ' + badgeColor + '">' + esc(act) + '</span><span class="text-[10px] font-semibold text-slate-400">' + esc(formatTurkeyDateTime(l.date)) + '</span></div>' +
+        var logKey = getLogUniqueKey(l);
+        // SADECE YÖNETİCİ İÇİN TEKİL LOG SİLME BUTONU
+        var adminDelLogBtn = isOnlyAdmin
+          ? '<button type="button" data-logkey="' + esc(logKey) + '" onclick="deleteSingleLog(this.getAttribute(\'data-logkey\'))" title="Bu Log Kaydını Sil (Yalnızca Yönetici)" class="text-[10px] font-extrabold text-rose-600 hover:text-white bg-rose-50 hover:bg-rose-600 border border-rose-200 px-2 py-0.5 rounded-lg active:scale-90 transition-all">🗑️ Sil</button>'
+          : '';
+
+        return '<div class="bg-white p-3.5 rounded-2xl border border-slate-200 text-xs shadow-sm space-y-1.5 hover:border-slate-300 transition-all">' +
+          '<div class="flex justify-between items-center gap-2">' +
+            '<span class="font-extrabold px-2 py-0.5 rounded-md border text-[10px] ' + badgeColor + '">' + esc(act) + '</span>' +
+            '<div class="flex items-center space-x-1.5">' +
+              '<span class="text-[10px] font-semibold text-slate-400">🕒 ' + esc(formatTurkeyDateTime(l.date)) + '</span>' +
+              adminDelLogBtn +
+            '</div>' +
+          '</div>' +
           '<p class="font-bold text-slate-800 pt-0.5 leading-snug">' + maskBlurText(l.details) + '</p>' +
-          '<span class="text-[10px] text-slate-400 block">👤 Yapan: <strong>' + esc(maskName(l.author)) + '</strong></span>' +
+          '<div class="flex justify-between items-center text-[10px] text-slate-400 pt-0.5 border-t border-slate-50">' +
+            '<span>👤 İşlemi Yapan: <strong class="text-slate-600">' + esc(maskName(l.author)) + '</strong></span>' +
+          '</div>' +
         '</div>';
       }).join('');
     }
 
-    // GİRİŞ EKRANI (Şifre yazısı kaldırıldı!)
+    // GİRİŞ EKRANI (Yönetici Paneli Başlıklarıyla Dinamik)
     function renderLoginView() {
       var lastId = '';
       try { lastId = localStorage.getItem('hare_last_member_id') || ''; } catch(e) {}
+      var st = state.settings || DEFAULT_SETTINGS;
 
       var membersOptions = state.members.filter(function(m) { return m.active; }).map(function(m) {
         var isSel = String(m.id).trim() === String(lastId).trim();
@@ -1623,10 +1885,10 @@
       return '<div class="flex-1 flex flex-col justify-center px-6 py-10 bg-white login-safe-bottom">' +
         '<div class="text-center mb-8">' +
           '<div class="flex justify-center mb-3">' + renderLogo(76) + '</div>' +
-          '<h1 class="text-3xl font-extrabold text-slate-900 tracking-tight font-display">Hâre</h1>' +
-          '<p class="text-xs font-bold text-emerald-800 tracking-wide mt-1">İnsani Yardım Halkası</p>' +
-          '<p class="text-[11px] text-slate-500 font-semibold mt-0.5">Hayır ve İyilikte Yardımlaşma Topluluğu</p>' +
-          '<p class="text-[11px] text-slate-400 italic mt-0.5">“İyilik ve takvâda (sorumluluk bilincinde) yardımlaşın...” (Mâide, 2)</p>' +
+          '<h1 class="text-3xl font-extrabold text-slate-900 tracking-tight font-display">' + esc(st.appTitle || 'Hâre') + '</h1>' +
+          '<p class="text-xs font-bold text-emerald-800 tracking-wide mt-1">' + esc(st.appSubtitle || 'İnsani Yardım Halkası') + '</p>' +
+          '<p class="text-[11px] text-slate-500 font-semibold mt-0.5">' + esc(st.orgDescription || 'Hayır ve İyilikte Yardımlaşma Topluluğu') + '</p>' +
+          '<p class="text-[11px] text-slate-400 italic mt-0.5">' + esc(st.orgMotto || '“İyilik ve takvâda (sorumluluk bilincinde) yardımlaşın...” (Mâide, 2)') + '</p>' +
           '<div class="w-10 h-1 bg-emerald-600 rounded-full mx-auto mt-3"></div>' +
         '</div>' +
         '<form onsubmit="handleLogin(event)" class="space-y-4 bg-slate-50 p-6 rounded-3xl border border-slate-200">' +
@@ -1671,8 +1933,15 @@
       var editingDonor = state.editingDonorId ? state.donors.find(function(d) { return String(d.id).trim() === String(state.editingDonorId).trim(); }) : null;
       var editingMember = state.editingMemberId ? state.members.find(function(m) { return String(m.id).trim() === String(state.editingMemberId).trim(); }) : null;
       var isAdmin = checkIsAdmin(state.currentUser);
+      var canEditAidsPerm = hasPermission('canEditAids');
+      var canManageKasaPerm = hasPermission('canManageKasa');
+      var canManageDonorsPerm = hasPermission('canManageDonors');
+      var canViewLogsPerm = hasPermission('canViewLogs');
+      var canExportPerm = hasPermission('canExportData');
+      var st = state.settings || DEFAULT_SETTINGS;
+      var curRoleMeta = getRoleMeta(state.currentUser);
 
-      var isAnyModalOpen = Boolean(selectedAid || (isAdmin && editingAid) || (isAdmin && editingBudget) || (isAdmin && editingDonor) || (isAdmin && editingMember) || state.viewingPhotoUrl || state.changingPin);
+      var isAnyModalOpen = Boolean(selectedAid || (canEditAidsPerm && editingAid) || (canManageKasaPerm && editingBudget) || (canManageDonorsPerm && editingDonor) || (isAdmin && editingMember) || state.viewingPhotoUrl || state.changingPin || state.viewingAppsScriptModal);
       if (typeof document !== 'undefined' && document.body) {
         if (isAnyModalOpen) {
           document.body.classList.add('modal-open');
@@ -1689,7 +1958,7 @@
       var netElden = eldenGelir - eldenGider;
       var toplamKalan = netBanka + netElden;
 
-      // ÜST BAR (Sade, Şık & Modern Mobil Tasarım - v2.6)
+      // ÜST BAR (Sade, Şık & Modern Mobil Tasarım - v3.2 Yönetici Paneli Kısayollu)
       var syncBadge = '<button onclick="syncFromGoogleSheet()" title="E-Tablo Eşitle" class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold border transition-all active:scale-95 ' + 
         (state.isSyncing ? 'bg-amber-50 text-amber-800 border-amber-300 animate-pulse' : 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100') + '">' +
         '<span class="w-1.5 h-1.5 rounded-full ' + (state.isSyncing ? 'bg-amber-500 animate-ping' : 'bg-emerald-500') + '"></span>' +
@@ -1701,41 +1970,50 @@
         '<span>🧹</span>' +
       '</button>';
 
-      var privacyBtn = '<button onclick="togglePrivacy()" title="' + (state.privacyMode ? 'Mahremiyet Modunu Kapat' : 'Mahremiyet Modunu Aç') + '" class="inline-flex items-center space-x-1 px-2.5 py-1 rounded-xl text-xs font-extrabold border shadow-sm transition-all active:scale-95 ' +
+      var adminPanelQuickBtn = isAdmin
+        ? '<button type="button" onclick="openAdminControlPanel()" title="Yönetici Sistem Kontrol Paneli" class="inline-flex items-center space-x-1 px-2 py-1 rounded-xl text-[10px] font-extrabold border shadow-xs transition-all active:scale-95 ' + (state.activeTab === 'ekip' && state.adminSubTab === 'panel' ? 'bg-emerald-900 text-white border-emerald-950 ring-2 ring-emerald-400/40' : 'bg-emerald-50 text-emerald-900 border-emerald-200 hover:bg-emerald-100') + '"><span>🛠️</span><span>Panel</span></button>'
+        : '';
+
+      var privacyBtn = '<button onclick="togglePrivacy()" title="' + (state.privacyMode ? 'Mahremiyet Modunu Kapat' : 'Mahremiyet Modunu Aç') + '" class="inline-flex items-center space-x-1 px-2 py-1 rounded-xl text-xs font-extrabold border shadow-sm transition-all active:scale-95 ' +
         (state.privacyMode ? 'bg-amber-500 text-white border-amber-600 ring-2 ring-amber-300/40' : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200') + '">' +
         '<span>' + (state.privacyMode ? '🔒' : '👁️') + '</span>' +
-        '<span class="text-[11px]">' + (state.privacyMode ? 'Mahrem' : 'Açık') + '</span>' +
+        '<span class="text-[10px]">' + (state.privacyMode ? 'Mahrem' : 'Açık') + '</span>' +
       '</button>';
 
       var logoutBtn = '<button onclick="logout()" title="Çıkış Yap" class="w-8 h-8 rounded-xl flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200 active:scale-90 transition-all text-sm font-bold">' +
         '🚪' +
       '</button>';
 
+      var maintenanceBannerHTML = st.maintenanceMode
+        ? '<div class="bg-amber-600 text-white px-3.5 py-2 text-[11px] font-extrabold flex items-center justify-between shadow-sm"><span>🔒 BAKIM (SALT-OKUNUR) MODU AKTİF — Gönüllü değişiklikleri kilitli</span>' + (isAdmin ? '<button type="button" onclick="togglePolicySetting(\'maintenanceMode\')" class="bg-white/20 hover:bg-white/30 px-2 py-0.5 rounded-lg text-[10px]">Kilidi Aç</button>' : '') + '</div>'
+        : '';
+
       var html = '<header class="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200/80 px-3.5 py-2 flex items-center justify-between shadow-xs">' +
         // SOL: LOGO + İSİM & KÜNYE
-        '<div class="flex items-center space-x-2.5 min-w-0">' +
+        '<div class="flex items-center space-x-2 min-w-0">' +
           '<div class="shrink-0 drop-shadow-sm">' + renderLogo(34) + '</div>' +
           '<div class="min-w-0">' +
             '<div class="flex items-center space-x-1.5">' +
-              '<h1 class="font-extrabold text-slate-900 text-base leading-none font-display tracking-tight">Hâre</h1>' +
-              '<span class="text-[9px] font-bold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded-md border border-emerald-200/80 leading-none hidden sm:inline-block">Halka</span>' +
+              '<h1 class="font-extrabold text-slate-900 text-base leading-none font-display tracking-tight truncate">' + esc(st.appTitle || 'Hâre') + '</h1>' +
               syncBadge +
               cleanBadge +
             '</div>' +
-            '<div class="text-[10px] text-slate-500 font-semibold tracking-wide truncate mt-0.5">' +
-              '<strong class="text-emerald-800 font-extrabold">' + esc(state.currentUser.name) + '</strong>' +
+            '<div class="text-[10px] text-slate-500 font-semibold tracking-wide truncate mt-0.5 flex items-center">' +
+              '<strong class="text-emerald-800 font-extrabold truncate">' + esc(state.currentUser.name) + '</strong>' +
               '<span class="text-slate-300 mx-1">•</span>' +
-              '<span>' + (isAdmin ? 'Emanetçi' : 'Gönüllü') + '</span>' +
-              '<button type="button" onclick="openChangePinModal()" title="Kendi Giriş PIN Kodumu Değiştir" class="inline-flex items-center space-x-0.5 ml-1.5 px-1.5 py-0.5 rounded-md text-[9px] font-bold text-slate-500 hover:text-emerald-800 bg-slate-100 hover:bg-emerald-50 border border-slate-200 active:scale-90 transition-all"><span>🔑</span><span>PIN</span></button>' +
+              '<span class="text-[9px] font-bold px-1.5 py-0.2 rounded ' + curRoleMeta.badgeClass + '">' + curRoleMeta.shortTitle + '</span>' +
+              '<button type="button" onclick="openChangePinModal()" title="Kendi Giriş PIN Kodumu Değiştir" class="inline-flex items-center space-x-0.5 ml-1 px-1.5 py-0.5 rounded-md text-[9px] font-bold text-slate-500 hover:text-emerald-800 bg-slate-100 hover:bg-emerald-50 border border-slate-200 active:scale-90 transition-all"><span>🔑</span><span>PIN</span></button>' +
             '</div>' +
           '</div>' +
         '</div>' +
         // SAĞ: BUTONLAR
-        '<div class="flex items-center space-x-1.5 shrink-0">' +
+        '<div class="flex items-center space-x-1 shrink-0">' +
+          adminPanelQuickBtn +
           privacyBtn +
           logoutBtn +
         '</div>' +
-      '</header>';
+      '</header>' +
+      maintenanceBannerHTML;
 
       html += '<main class="flex-1 p-4">';
 
@@ -1864,7 +2142,28 @@
             '</div>';
           }).join('');
 
+          var announcementBannerHTML = '';
+          if (st.announcementActive && (st.announcementTitle || st.announcementText)) {
+            var annStyle = st.announcementType === 'urgent'
+              ? 'bg-gradient-to-r from-rose-700 to-rose-600 text-white border-rose-400'
+              : (st.announcementType === 'warning'
+                  ? 'bg-gradient-to-r from-amber-600 to-amber-500 text-white border-amber-300'
+                  : 'bg-gradient-to-r from-emerald-900 to-emerald-800 text-white border-emerald-600');
+            var annIcon = st.announcementType === 'urgent' ? '🚨' : (st.announcementType === 'warning' ? '⚠️' : '📢');
+            announcementBannerHTML = '<div class="' + annStyle + ' p-4 rounded-3xl shadow-lg border space-y-1.5 relative overflow-hidden">' +
+              '<div class="flex items-start justify-between gap-2">' +
+                '<div class="flex items-center space-x-2">' +
+                  '<span class="text-lg">' + annIcon + '</span>' +
+                  '<h3 class="text-xs font-extrabold uppercase tracking-wider font-display">' + esc(st.announcementTitle || 'Saha Koordinasyon Duyurusu') + '</h3>' +
+                '</div>' +
+                (isAdmin ? '<button type="button" onclick="openAdminControlPanel(\'kurum\')" class="text-[10px] font-bold bg-black/25 hover:bg-black/40 px-2 py-0.5 rounded-lg shrink-0">⚙️ Düzenle</button>' : '') +
+              '</div>' +
+              (st.announcementText ? '<p class="text-xs font-medium leading-relaxed opacity-95 whitespace-pre-line">' + esc(st.announcementText) + '</p>' : '') +
+            '</div>';
+          }
+
           html += '<div class="space-y-4">' +
+            announcementBannerHTML +
             topCardsHTML +
             '<div class="relative">' +
               '<input type="text" placeholder="Hızlı hane, mahalle, telefon veya ihtiyaç ara..." onclick="openStatusPage(\'Tümü\', true)" readonly class="w-full bg-white border border-slate-200 rounded-2xl px-4 py-3 text-xs font-medium outline-none focus:ring-2 focus:ring-emerald-600 shadow-sm cursor-pointer" />' +
@@ -1884,9 +2183,9 @@
         }
       }
 
-      // 2. HANE EKLE SEKMESİ (İl / İlçe / Mahalle 3'lü Yerleşimi)
+      // 2. HANE EKLE SEKMESİ (İl / İlçe / Mahalle 3'lü Yerleşimi + Yönetici Paneli Kategorileri)
       else if (state.activeTab === 'yeni') {
-        var catOptions = EMANET_CATEGORIES.map(function(catObj) {
+        var catOptions = getAllEmanetCategories().map(function(catObj) {
           return '<label class="flex items-center space-x-2 bg-slate-50 hover:bg-emerald-50/50 p-2.5 rounded-xl border border-slate-200 cursor-pointer transition-all select-none">' +
             '<input type="checkbox" name="newCats" value="' + esc(catObj.value) + '" class="accent-emerald-600 w-4 h-4 rounded shrink-0" /><span class="truncate">' + esc(catObj.label) + '</span>' +
           '</label>';
@@ -1896,8 +2195,8 @@
           '<h2 class="font-extrabold text-slate-900 text-lg font-display">Yeni Hane (İhtiyaç Sahibi Kardeşimiz) Kaydı</h2>' +
           '<div><label class="text-xs font-bold text-slate-500 uppercase">Hane (Aile) Adı</label><input id="newFullName" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm mt-1 font-semibold outline-none focus:ring-2 focus:ring-emerald-600" placeholder="Örn: Ahmet Amca / Yetim Ailesi" /></div>' +
           '<div class="grid grid-cols-3 gap-2">' +
-            '<div><label class="text-xs font-bold text-slate-500 uppercase">İl</label><input id="newCity" required value="Kayseri" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm mt-1 font-semibold outline-none focus:ring-2 focus:ring-emerald-600" placeholder="İl (Örn: Kayseri)" /></div>' +
-            '<div><label class="text-xs font-bold text-slate-500 uppercase">İlçe</label><input id="newDistrict" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm mt-1 font-semibold outline-none focus:ring-2 focus:ring-emerald-600" placeholder="İlçe" /></div>' +
+            '<div><label class="text-xs font-bold text-slate-500 uppercase">İl</label><input id="newCity" required value="' + esc(st.defaultCity || 'Kayseri') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm mt-1 font-semibold outline-none focus:ring-2 focus:ring-emerald-600" placeholder="İl (Örn: Kayseri)" /></div>' +
+            '<div><label class="text-xs font-bold text-slate-500 uppercase">İlçe</label><input id="newDistrict" required value="' + esc(st.defaultDistrict || '') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm mt-1 font-semibold outline-none focus:ring-2 focus:ring-emerald-600" placeholder="İlçe" /></div>' +
             '<div><label class="text-xs font-bold text-slate-500 uppercase">Mahalle</label><input id="newNeighborhood" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm mt-1 font-semibold outline-none focus:ring-2 focus:ring-emerald-600" placeholder="Mahalle" /></div>' +
           '</div>' +
           '<div><label class="text-xs font-bold text-slate-500 uppercase">İletişim Numarası</label><input id="newPhone" type="tel" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm mt-1 font-semibold outline-none focus:ring-2 focus:ring-emerald-600" placeholder="05XXXXXXXXX" /></div>' +
@@ -2110,7 +2409,7 @@
               ? '<div class="bg-white p-6 rounded-2xl text-center text-xs text-slate-400 font-semibold border border-slate-200">Bu filtreye uygun kasa hareketi bulunamadı.</div>'
               : filteredBudget.map(function(b) {
               var channelBadge = b.channel === 'banka' ? '<span class="text-xs font-bold px-2 py-0.5 rounded-md bg-blue-50 text-blue-800 border border-blue-200">🏦 Banka</span>' : '<span class="text-xs font-bold px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200">💵 Elden</span>';
-              var adminBtns = isAdmin ? '<div class="flex justify-end space-x-1 mt-1.5"><button data-id="' + esc(b.id) + '" onclick="openEditBudget(this.getAttribute(\'data-id\'))" class="text-[10px] text-emerald-800 font-bold hover:bg-slate-100 px-2 py-0.5 rounded border border-slate-200">✏️ Düzenle</button><button data-id="' + esc(b.id) + '" onclick="deleteBudgetItem(this.getAttribute(\'data-id\'))" class="text-[10px] text-rose-600 font-bold hover:bg-rose-50 px-2 py-0.5 rounded border border-rose-200">Sil</button></div>' : '';
+              var adminBtns = canManageKasaPerm ? '<div class="flex justify-end space-x-1 mt-1.5"><button data-id="' + esc(b.id) + '" onclick="openEditBudget(this.getAttribute(\'data-id\'))" class="text-[10px] text-emerald-800 font-bold hover:bg-slate-100 px-2 py-0.5 rounded border border-slate-200">✏️ Düzenle</button><button data-id="' + esc(b.id) + '" onclick="deleteBudgetItem(this.getAttribute(\'data-id\'))" class="text-[10px] text-rose-600 font-bold hover:bg-rose-50 px-2 py-0.5 rounded border border-rose-200">Sil</button></div>' : '';
 
               return '<div class="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm space-y-2">' +
                 '<div class="flex justify-between items-start">' +
@@ -2152,15 +2451,29 @@
               return '<option value="' + esc(m.name) + '">' + esc(m.name) + '</option>';
             }).join('');
 
+            var orgIbanCardHTML = st.orgIban
+              ? '<div class="bg-white p-3.5 rounded-2xl border border-emerald-200 shadow-xs flex items-center justify-between gap-2">' +
+                  '<div class="min-w-0">' +
+                    '<span class="text-[10px] font-extrabold text-emerald-800 uppercase block">🏦 Resmi Emanet Hesabı ' + (st.orgIbanHolder ? '(' + esc(st.orgIbanHolder) + ')' : '') + '</span>' +
+                    '<span class="text-xs font-mono font-bold text-slate-800 truncate block mt-0.5">' + esc(st.orgIban) + '</span>' +
+                  '</div>' +
+                  '<div class="flex items-center space-x-1 shrink-0">' +
+                    '<button type="button" onclick="copyOrgIban()" class="bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 px-2.5 py-1.5 rounded-xl text-[10px] font-extrabold active:scale-95">📋 Kopyala</button>' +
+                    '<button type="button" onclick="shareOrgIbanWhatsApp()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1.5 rounded-xl text-[10px] font-extrabold active:scale-95">💬 Gönder</button>' +
+                  '</div>' +
+                '</div>'
+              : '';
+
             html += '<div class="space-y-4">' +
               '<div class="bg-emerald-950 text-white p-5 rounded-3xl shadow-xl relative overflow-hidden">' +
                 '<span class="text-xs font-bold text-emerald-300 uppercase tracking-wider">Sandıktaki Genel Emanet</span>' +
-                '<h2 class="text-3xl font-extrabold mt-1 font-display ' + (state.privacyMode ? 'filter blur-[5px] select-none hover:blur-none transition-all cursor-pointer' : '') + '">' + toplamKalan.toLocaleString('tr-TR') + ' ₺</h2>' +
+                '<h2 class="text-3xl font-extrabold mt-1 font-display ' + (state.privacyMode ? 'filter blur-[5px] select-none hover:blur-none transition-all cursor-pointer' : '') + '">' + toplamKalan.toLocaleString('tr-TR') + ' ' + esc(st.currencySymbol || '₺') + '</h2>' +
                 '<div class="grid grid-cols-2 gap-2 mt-4 pt-3 border-t border-emerald-700/60 text-xs">' +
-                  '<div class="bg-black/20 p-2.5 rounded-xl"><span class="text-emerald-300 block text-[10px] font-bold">🏦 Banka Hesabı:</span><span class="font-extrabold text-sm ' + (netBanka >= 0 ? 'text-white' : 'text-rose-300') + ' ' + (state.privacyMode ? 'filter blur-[4px] select-none hover:blur-none transition-all cursor-pointer' : '') + '">' + netBanka.toLocaleString('tr-TR') + ' ₺</span></div>' +
-                  '<div class="bg-black/20 p-2.5 rounded-xl"><span class="text-emerald-300 block text-[10px] font-bold">💵 Elden Nakit:</span><span class="font-extrabold text-sm ' + (netElden >= 0 ? 'text-white' : 'text-rose-300') + ' ' + (state.privacyMode ? 'filter blur-[4px] select-none hover:blur-none transition-all cursor-pointer' : '') + '">' + netElden.toLocaleString('tr-TR') + ' ₺</span></div>' +
+                  '<div class="bg-black/20 p-2.5 rounded-xl"><span class="text-emerald-300 block text-[10px] font-bold">🏦 Banka Hesabı:</span><span class="font-extrabold text-sm ' + (netBanka >= 0 ? 'text-white' : 'text-rose-300') + ' ' + (state.privacyMode ? 'filter blur-[4px] select-none hover:blur-none transition-all cursor-pointer' : '') + '">' + netBanka.toLocaleString('tr-TR') + ' ' + esc(st.currencySymbol || '₺') + '</span></div>' +
+                  '<div class="bg-black/20 p-2.5 rounded-xl"><span class="text-emerald-300 block text-[10px] font-bold">💵 Elden Nakit:</span><span class="font-extrabold text-sm ' + (netElden >= 0 ? 'text-white' : 'text-rose-300') + ' ' + (state.privacyMode ? 'filter blur-[4px] select-none hover:blur-none transition-all cursor-pointer' : '') + '">' + netElden.toLocaleString('tr-TR') + ' ' + esc(st.currencySymbol || '₺') + '</span></div>' +
                 '</div>' +
               '</div>' +
+              orgIbanCardHTML +
               '<div class="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-4">' +
                 '<span class="text-xs font-bold text-slate-800 uppercase tracking-wider block font-display">Emanet (Kasa) Hareketi Ekle</span>' +
                 '<div class="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-2xl">' +
@@ -2537,21 +2850,30 @@
         }
       }
 
-      // 5. GÖNÜLLÜLER SEKMESİ (Sınırsız & Yönetici Yapma Yetkisi)
+      // 5. GÖNÜLLÜLER, EKİP YETKİ, LOG SİLME VE KAPSAMLI YÖNETİCİ PANELİ SEKMESİ
       else if (state.activeTab === 'ekip') {
-        var adminSubTabsHTML = isAdmin ? '<div class="grid grid-cols-3 gap-1 p-1 bg-slate-200 rounded-2xl text-center mb-4">' +
-          '<button onclick="setAdminSubTab(\'rehber\')" class="py-2 rounded-xl text-[10px] font-extrabold transition-all ' + (state.adminSubTab === 'rehber' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-600') + '">👥 Rehber</button>' +
-          '<button onclick="setAdminSubTab(\'yonetim\')" class="py-2 rounded-xl text-[10px] font-extrabold transition-all ' + (state.adminSubTab === 'yonetim' ? 'bg-emerald-800 text-white shadow-sm' : 'text-slate-600') + '">⚙️ Ekip & Yetki</button>' +
-          '<button onclick="setAdminSubTab(\'gunluk\')" class="py-2 rounded-xl text-[10px] font-extrabold transition-all ' + (state.adminSubTab === 'gunluk' ? 'bg-blue-800 text-white shadow-sm' : 'text-slate-600') + '">📜 Günlük</button>' +
-        '</div>' : '';
+        var adminSubTabsHTML = '';
+        if (isAdmin) {
+          adminSubTabsHTML = '<div class="grid grid-cols-4 gap-1 p-1 bg-slate-200 rounded-2xl text-center mb-4">' +
+            '<button onclick="setAdminSubTab(\'rehber\')" class="py-2 rounded-xl text-[10px] font-extrabold transition-all ' + (state.adminSubTab === 'rehber' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-600') + '">👥 Rehber</button>' +
+            '<button onclick="setAdminSubTab(\'yonetim\')" class="py-2 rounded-xl text-[10px] font-extrabold transition-all ' + (state.adminSubTab === 'yonetim' ? 'bg-emerald-800 text-white shadow-sm' : 'text-slate-600') + '">🛡️ Ekip & Yetki</button>' +
+            '<button onclick="setAdminSubTab(\'gunluk\')" class="py-2 rounded-xl text-[10px] font-extrabold transition-all ' + (state.adminSubTab === 'gunluk' ? 'bg-blue-800 text-white shadow-sm' : 'text-slate-600') + '">📜 Günlük</button>' +
+            '<button onclick="setAdminSubTab(\'panel\')" class="py-2 rounded-xl text-[10px] font-extrabold transition-all ' + (state.adminSubTab === 'panel' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600') + '">🛠️ Yönetim</button>' +
+          '</div>';
+        } else if (canViewLogsPerm) {
+          adminSubTabsHTML = '<div class="grid grid-cols-2 gap-1 p-1 bg-slate-200 rounded-2xl text-center mb-4">' +
+            '<button onclick="setAdminSubTab(\'rehber\')" class="py-2 rounded-xl text-xs font-extrabold transition-all ' + (state.adminSubTab !== 'gunluk' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-600') + '">👥 Gönüllü Rehberi</button>' +
+            '<button onclick="setAdminSubTab(\'gunluk\')" class="py-2 rounded-xl text-xs font-extrabold transition-all ' + (state.adminSubTab === 'gunluk' ? 'bg-blue-800 text-white shadow-sm' : 'text-slate-600') + '">📜 İşlem Günlüğü</button>' +
+          '</div>';
+        }
 
         html += '<div class="space-y-4">' + adminSubTabsHTML;
 
         // A. REHBER (Herkes Görür)
-        if (!isAdmin || state.adminSubTab === 'rehber') {
+        if ((!isAdmin && (!canViewLogsPerm || state.adminSubTab !== 'gunluk')) || state.adminSubTab === 'rehber') {
           var membersListHTML = state.members.filter(function(m) { return m.active; }).map(function(m) {
             var cleanP = cleanPhone(m.phone);
-            var waNum = cleanP.length === 10 ? '90' + cleanP : (cleanP.indexOf('0') === 0 ? '9' + cleanP : cleanP);
+            var mRoleMeta = getRoleMeta(m);
             var phoneBtns = cleanP ? '<div class="flex gap-2 mt-3 pt-3 border-t border-slate-100"><button type="button" data-phone="' + esc(cleanP) + '" onclick="callPhone(this.getAttribute(\'data-phone\'))" class="flex-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 py-2.5 rounded-xl text-xs font-extrabold flex items-center justify-center space-x-1.5 active:scale-95 transition-all"><span>📞 Telefonla Ara</span></button><button type="button" data-phone="' + esc(cleanP) + '" onclick="openWhatsAppChat(this.getAttribute(\'data-phone\'))" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl text-xs font-extrabold flex items-center justify-center space-x-1.5 shadow-sm active:scale-95 transition-all"><span>💬 WhatsApp</span></button></div>' : '<div class="mt-2 pt-2 border-t text-[10px] text-slate-400 italic">Telefon bilgisi eklenmedi</div>';
 
             return '<div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">' +
@@ -2559,7 +2881,7 @@
                 '<div>' +
                   '<h4 class="font-extrabold text-slate-900 text-sm font-display">' + esc(maskName(m.name)) + '</h4>' +
                   '<div class="flex flex-wrap gap-1 mt-1">' +
-                    '<span class="text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">' + (m.role === 'admin' ? 'Emanetçi (Yönetici)' : 'Gönüllü Kardeşimiz') + '</span>' +
+                    '<span class="text-[10px] font-bold px-2 py-0.5 rounded-md ' + mRoleMeta.badgeClass + '">' + mRoleMeta.title + '</span>' +
                     (m.profession ? '<span class="text-[10px] font-bold text-blue-800 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md">🛠️ ' + esc(m.profession) + '</span>' : '') +
                   '</div>' +
                 '</div>' +
@@ -2570,140 +2892,468 @@
           }).join('');
 
           html += '<div class="space-y-3">' +
-            '<div class="bg-emerald-950 text-white p-4 rounded-3xl shadow-md">' +
-              '<span class="text-[10px] font-bold text-emerald-300 uppercase tracking-wider">' + state.members.filter(function(m) { return m.active; }).length + ' Aktif Gönüllü</span>' +
-              '<h3 class="text-lg font-extrabold font-display">Hâre İnsani Yardım Halkası Gönüllü Rehberi</h3>' +
-              '<p class="text-xs text-emerald-100">İyilik ve takvâ yolunda omuz omuza çalışan gönüllü kardeşlerimizin rehberi.</p>' +
+            '<div class="bg-emerald-950 text-white p-4 rounded-3xl shadow-md flex justify-between items-center">' +
+              '<div>' +
+                '<span class="text-[10px] font-bold text-emerald-300 uppercase tracking-wider">' + state.members.filter(function(m) { return m.active; }).length + ' Aktif Ekip Üyesi</span>' +
+                '<h3 class="text-lg font-extrabold font-display">' + esc(st.appTitle || 'Hâre') + ' Gönüllü Rehberi</h3>' +
+                '<p class="text-xs text-emerald-100">İyilik ve takvâ yolunda omuz omuza çalışan gönüllü kardeşlerimizin rehberi.</p>' +
+              '</div>' +
+              (isAdmin ? '<button type="button" onclick="openAdminControlPanel()" class="bg-white/15 hover:bg-white/25 text-white text-[10px] font-extrabold px-3 py-2 rounded-2xl border border-white/20 shrink-0 active:scale-95">🛠️ Panel →</button>' : '') +
             '</div>' +
             '<div class="space-y-2.5">' + membersListHTML + '</div>' +
           '</div>';
         }
 
-        // B. EKİP YÖNETİMİ & ÜYEYİ YÖNETİCİ YAPMA (Sadece Yönetici)
+        // B. EKİP & YETKİ YÖNETİMİ (Sadece Yönetici: 4 Kademeli Rol + Özel Yetki Anahtarları + Tek Tıkla Yetki)
         else if (isAdmin && state.adminSubTab === 'yonetim') {
+          var newDraftPerms = state.newMemberPermsDraft || getRoleDefaultPermissions('member');
+          var newPermCheckboxesHTML = PERMISSION_DEFINITIONS.map(function(p) {
+            var isChecked = Boolean(newDraftPerms[p.key]);
+            return '<label class="flex items-start space-x-2 bg-slate-50 hover:bg-emerald-50/40 p-2 rounded-xl border border-slate-200 cursor-pointer select-none">' +
+              '<input type="checkbox" name="newMemberPermCheck" value="' + esc(p.key) + '" ' + (isChecked ? 'checked' : '') + ' class="accent-emerald-600 w-3.5 h-3.5 mt-0.5 rounded shrink-0" />' +
+              '<div class="min-w-0"><span class="text-[11px] font-bold text-slate-800 block leading-tight">' + esc(p.label) + '</span><span class="text-[9px] text-slate-400 block leading-tight mt-0.5">' + esc(p.desc) + '</span></div>' +
+            '</label>';
+          }).join('');
+
           var allMembersControlHTML = state.members.map(function(m) {
             var mId = String(m.id || '').trim();
             var currId = state.currentUser ? String(state.currentUser.id || '').trim() : '';
             var isSelf = (mId && currId && mId === currId) || (m.name.toLowerCase().trim() === (state.currentUser ? state.currentUser.name.toLowerCase().trim() : ''));
             var isActive = parseActive(m.active);
-            var isMemberAdmin = checkIsAdmin(m);
-            var roleBadge = isMemberAdmin ? 'bg-emerald-100 text-emerald-900 border border-emerald-300' : 'bg-slate-200 text-slate-700';
-            var roleTitle = isMemberAdmin ? 'Emanetçi (Yönetici)' : 'Gönüllü Kardeşimiz';
+            var mRoleMeta = getRoleMeta(m);
+            var mPerms = getMemberEffectivePermissions(m);
+            var isTargetAdmin = mRoleMeta.code === 'admin';
 
-            return '<div class="p-3 rounded-2xl bg-slate-50 border border-slate-200 flex justify-between items-center text-xs shadow-sm">' +
-              '<div>' +
-                '<div class="flex items-center space-x-1.5">' +
-                  '<span class="font-bold text-slate-800">' + esc(maskName(m.name)) + '</span>' +
-                  '<span class="text-[9px] ' + roleBadge + ' px-1.5 py-0.5 rounded font-bold">' + roleTitle + '</span>' +
-                  (!isActive ? '<span class="text-[9px] text-rose-600 bg-rose-50 border border-rose-200 px-1 py-0.5 rounded font-bold">❄️ Donduruldu</span>' : '') +
+            var permTags = [];
+            if (isTargetAdmin) {
+              permTags.push('<span class="text-[9px] bg-emerald-50 text-emerald-800 border border-emerald-200 px-1.5 py-0.5 rounded font-bold">⭐ Tam Sistem Yetkisi</span>');
+            } else {
+              if (mPerms.canEditAids) permTags.push('<span class="text-[9px] bg-blue-50 text-blue-800 border border-blue-200 px-1.5 py-0.5 rounded font-semibold">✏️ Hane Düzenle/Sil</span>');
+              if (mPerms.canManageKasa) permTags.push('<span class="text-[9px] bg-amber-50 text-amber-800 border border-amber-200 px-1.5 py-0.5 rounded font-semibold">🗳️ Kasa Yönetimi</span>');
+              if (mPerms.canManageDonors) permTags.push('<span class="text-[9px] bg-purple-50 text-purple-800 border border-purple-200 px-1.5 py-0.5 rounded font-semibold">🤝 Bağışçı Yönetimi</span>');
+              if (mPerms.canViewLogs) permTags.push('<span class="text-[9px] bg-slate-100 text-slate-700 border border-slate-200 px-1.5 py-0.5 rounded font-semibold">📜 Log Görme</span>');
+              if (mPerms.canExportData) permTags.push('<span class="text-[9px] bg-teal-50 text-teal-800 border border-teal-200 px-1.5 py-0.5 rounded font-semibold">📊 Rapor İndir</span>');
+            }
+
+            return '<div class="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2 text-xs shadow-sm">' +
+              '<div class="flex justify-between items-start gap-2">' +
+                '<div class="min-w-0">' +
+                  '<div class="flex items-center flex-wrap gap-1.5">' +
+                    '<span class="font-extrabold text-slate-900 text-sm font-display">' + esc(maskName(m.name)) + (isSelf ? ' (Siz)' : '') + '</span>' +
+                    '<span class="text-[9px] ' + mRoleMeta.badgeClass + ' px-2 py-0.5 rounded-md font-extrabold">' + mRoleMeta.title + '</span>' +
+                    (!isActive ? '<span class="text-[9px] text-rose-600 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded font-bold">❄️ Donduruldu</span>' : '') +
+                  '</div>' +
+                  '<span class="text-[10px] text-slate-400 block mt-0.5">🛠️ ' + esc(m.profession || 'Meslek Yok') + ' • 📞 ' + esc(maskPhone(m.phone || 'Yok')) + '</span>' +
                 '</div>' +
-                '<span class="text-[10px] text-slate-400 block mt-0.5">🛠️ ' + esc(m.profession || 'Meslek Yok') + ' • 📞 ' + esc(maskPhone(m.phone || 'Yok')) + '</span>' +
               '</div>' +
-              '<div class="flex items-center space-x-1">' +
-                '<button type="button" data-id="' + esc(mId) + '" onclick="openEditMember(this.getAttribute(\'data-id\'))" class="text-[10px] px-2.5 py-1.5 rounded-xl font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 active:scale-95 transition-all">✏️ Yetki</button>' +
-                (!isSelf ? '<button type="button" data-id="' + esc(mId) + '" onclick="toggleMemberActive(this.getAttribute(\'data-id\'))" class="text-[10px] px-2.5 py-1.5 rounded-xl font-bold active:scale-95 transition-all ' + (isActive ? 'bg-amber-100 text-amber-900 hover:bg-amber-200 border border-amber-300' : 'bg-emerald-100 text-emerald-900 hover:bg-emerald-200 border border-emerald-300') + '">' + (isActive ? '❄️ Dondur' : '▶️ Aç') + '</button><button type="button" data-id="' + esc(mId) + '" onclick="deleteMember(this.getAttribute(\'data-id\'))" class="text-[10px] px-2.5 py-1.5 rounded-xl font-bold bg-rose-100 text-rose-700 hover:bg-rose-200 border border-rose-300 active:scale-95 transition-all">🗑️ Sil</button>' : '') +
+              (permTags.length > 0 ? '<div class="flex flex-wrap gap-1 pt-0.5">' + permTags.join('') + '</div>' : '') +
+              '<div class="flex flex-wrap items-center justify-between gap-1.5 pt-2 border-t border-slate-200/70">' +
+                '<div class="flex items-center space-x-1">' +
+                  '<button type="button" data-id="' + esc(mId) + '" onclick="openEditMember(this.getAttribute(\'data-id\'))" class="text-[10px] px-2.5 py-1.5 rounded-xl font-extrabold bg-emerald-800 hover:bg-emerald-900 text-white shadow-xs active:scale-95 transition-all">🛡️ Yetki & Düzenle</button>' +
+                  (!isSelf ? '<button type="button" data-id="' + esc(mId) + '" onclick="quickToggleMemberAdmin(this.getAttribute(\'data-id\'))" class="text-[10px] px-2.5 py-1.5 rounded-xl font-bold border active:scale-95 transition-all ' + (isTargetAdmin ? 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200' : 'bg-indigo-50 text-indigo-900 border-indigo-200 hover:bg-indigo-100') + '">' + (isTargetAdmin ? '👤 Gönüllü Yap' : '👑 Yönetici Yap') + '</button>' : '') +
+                '</div>' +
+                (!isSelf ? '<div class="flex items-center space-x-1">' +
+                  '<button type="button" data-id="' + esc(mId) + '" onclick="toggleMemberActive(this.getAttribute(\'data-id\'))" class="text-[10px] px-2.5 py-1.5 rounded-xl font-bold active:scale-95 transition-all ' + (isActive ? 'bg-amber-100 text-amber-900 hover:bg-amber-200 border border-amber-300' : 'bg-emerald-100 text-emerald-900 hover:bg-emerald-200 border border-emerald-300') + '">' + (isActive ? '❄️ Dondur' : '▶️ Aç') + '</button>' +
+                  '<button type="button" data-id="' + esc(mId) + '" onclick="deleteMember(this.getAttribute(\'data-id\'))" class="text-[10px] px-2.5 py-1.5 rounded-xl font-bold bg-rose-100 text-rose-700 hover:bg-rose-200 border border-rose-300 active:scale-95 transition-all">🗑️ Sil</button>' +
+                '</div>' : '') +
               '</div>' +
             '</div>';
           }).join('');
 
           html += '<div class="space-y-4">' +
-            '<form onsubmit="handleNewMember(event)" class="bg-white p-5 rounded-3xl border border-slate-200 space-y-3 shadow-sm">' +
-              '<span class="text-xs font-bold text-slate-800 uppercase block font-display">Ekibe Yeni Gönüllü Ekle</span>' +
+            '<div class="bg-emerald-950 text-white p-4 rounded-3xl shadow-md flex justify-between items-center">' +
+              '<div>' +
+                '<span class="text-[10px] font-bold text-emerald-300 uppercase tracking-wider">Emanet & Ekip Yetkilendirme</span>' +
+                '<h3 class="text-lg font-extrabold font-display">Ekip ve Yetki Yönetimi</h3>' +
+                '<p class="text-xs text-emerald-100">Gönüllülere rol ve özel modül yetkileri tanımlayın; tüm yetkiler E-Tablo ile anında eşitlenir.</p>' +
+              '</div>' +
+            '</div>' +
+            '<form onsubmit="handleNewMember(event)" class="bg-white p-5 rounded-3xl border border-slate-200 space-y-3.5 shadow-sm">' +
+              '<span class="text-xs font-extrabold text-slate-800 uppercase block font-display">➕ Ekibe Yeni Üye / Yetkili Ekle</span>' +
               '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Adı Soyadı</label><input id="newMemberName" required placeholder="Gönüllünün Adı Soyadı" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
-              '<div><label class="text-[11px] font-bold text-slate-500 uppercase">İletişim Numarası (Telefon)</label><input id="newMemberPhone" type="tel" required placeholder="05XXXXXXXXX" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
-              '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Meslek / Uzmanlık Alanı</label><input id="newMemberProfession" placeholder="Örn: Doktor, Şoför, Elektrikçi..." class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
               '<div class="grid grid-cols-2 gap-2">' +
-                '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Sistem Rolü</label><select id="newMemberRole" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold"><option value="member">Gönüllü Kardeşimiz</option><option value="admin">Emanetçi (Yönetici)</option></select></div>' +
-                '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Giriş PIN Kodu</label><input id="newMemberPin" maxlength="4" placeholder="PIN" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:bg-white" /></div>' +
+                '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Telefon Numarası</label><input id="newMemberPhone" type="tel" required placeholder="05XXXXXXXXX" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
+                '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Meslek / Görev</label><input id="newMemberProfession" placeholder="Örn: Doktor, Lojistik..." class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
               '</div>' +
-              '<button type="submit" class="w-full bg-emerald-800 text-white font-extrabold text-xs py-3 rounded-xl font-display shadow-md">Gönüllüyü Ekibe Kaydet</button>' +
+              '<div class="grid grid-cols-2 gap-2">' +
+                '<div><label class="text-[11px] font-bold text-emerald-800 uppercase">Sistem Rolü (Yetki Seviyesi)</label>' +
+                  '<select id="newMemberRole" onchange="onNewMemberRoleChange(this.value)" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:ring-2 focus:ring-emerald-600">' +
+                    '<option value="member">🤝 Saha Gönüllüsü</option>' +
+                    '<option value="treasurer">💼 Kasa & Emanet Sorumlusu</option>' +
+                    '<option value="co_admin">🛡️ Yardımcı Yönetici (Koordinatör)</option>' +
+                    '<option value="admin">👑 Baş Emanetçi (Tam Yönetici)</option>' +
+                  '</select>' +
+                '</div>' +
+                '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Giriş PIN Kodu</label><input id="newMemberPin" maxlength="4" value="' + esc(st.defaultPin || '1453') + '" placeholder="1453" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:bg-white" /></div>' +
+              '</div>' +
+              '<div>' +
+                '<label class="text-[11px] font-bold text-slate-500 uppercase block mb-1.5">🛡️ Kişiye Özel Modül Yetkileri</label>' +
+                '<div id="newMemberPermsBox" class="grid grid-cols-1 gap-1.5">' + newPermCheckboxesHTML + '</div>' +
+              '</div>' +
+              '<button type="submit" class="w-full bg-emerald-800 hover:bg-emerald-900 text-white font-extrabold text-xs py-3.5 rounded-xl font-display shadow-md active:scale-95 transition-all">Üyeyi ve Yetkilerini E-Tabloya Kaydet</button>' +
             '</form>' +
-            '<div class="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-3"><span class="text-xs font-bold text-slate-800 uppercase block font-display">Gönüllü Yetki Kontrolü</span><div class="space-y-2">' + allMembersControlHTML + '</div></div>' +
-            '<div class="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-3">' +
-              '<div class="flex items-center space-x-2.5">' +
-                '<span class="text-xl">🔗</span>' +
-                '<div><h4 class="text-xs font-bold text-slate-800 uppercase font-display">Google E-Tablo Bağlantı Linki (Web App)</h4><p class="text-[10px] text-slate-400">Verilerin senkronize olduğu Apps Script Web App adresi.</p></div>' +
-              '</div>' +
-              '<div><input id="sheetUrlInput" value="' + esc(state.sheetUrl) + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white text-slate-700" placeholder="https://script.google.com/macros/s/.../exec" /></div>' +
-              '<div class="grid grid-cols-2 gap-2">' +
-                '<button type="button" onclick="saveSheetUrl()" class="bg-emerald-800 hover:bg-emerald-900 text-white font-extrabold text-xs py-2.5 rounded-xl shadow active:scale-95 transition-all">💾 Linki Kaydet & Eşitle</button>' +
-                '<button type="button" onclick="resetSheetUrl()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-2.5 rounded-xl border border-slate-200 active:scale-95 transition-all">🔄 Varsayılana Dön</button>' +
-              '</div>' +
-            '</div>' +
-            '<div class="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-3.5">' +
-              '<div class="flex items-center space-x-2.5">' +
-                '<span class="text-xl">💾</span>' +
-                '<div><h4 class="text-xs font-bold text-slate-800 uppercase font-display">Veri Yedekleme ve Geri Yükleme</h4><p class="text-[10px] text-slate-400">Verilerinizi tek tıkla telefonunuza/bilgisayarınıza indirin veya eski bir yedeği yükleyin.</p></div>' +
-              '</div>' +
-              '<div class="grid grid-cols-2 gap-2">' +
-                '<button type="button" onclick="exportBackupJSON()" class="bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 py-3 rounded-2xl text-xs font-extrabold flex flex-col items-center justify-center space-y-0.5 active:scale-95 transition-all shadow-sm">' +
-                  '<span class="text-base">📦</span>' +
-                  '<span>Tam Yedek İndir</span>' +
-                  '<span class="text-[9px] text-emerald-700 font-bold">(JSON Formatı)</span>' +
-                '</button>' +
-                '<button type="button" onclick="exportAidsCSV()" class="bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-200 py-3 rounded-2xl text-xs font-extrabold flex flex-col items-center justify-center space-y-0.5 active:scale-95 transition-all shadow-sm">' +
-                  '<span class="text-base">📊</span>' +
-                  '<span>Excel Tablosu</span>' +
-                  '<span class="text-[9px] text-blue-700 font-bold">(Haneler .CSV)</span>' +
-                '</button>' +
-              '</div>' +
-              '<button type="button" onclick="exportBudgetCSV()" class="w-full bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 active:scale-95 transition-all">' +
-                '<span>🗳️ Sandık (Kasa) Defterini İndir (.CSV)</span>' +
-              '</button>' +
-              '<div class="pt-2 border-t border-slate-100 space-y-1.5">' +
-                '<label class="text-[11px] font-bold text-slate-600 block">📥 Yedekten Geri Yükle (JSON):</label>' +
-                '<input type="file" id="backupFileInput" accept=".json" onchange="importBackupJSON(event)" class="text-xs text-slate-500 file:mr-2 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-emerald-800 file:text-white hover:file:bg-emerald-900 cursor-pointer w-full bg-slate-50 p-1.5 rounded-xl border border-slate-200" />' +
-              '</div>' +
-            '</div>' +
             '<div class="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-3">' +
               '<div class="flex justify-between items-center">' +
-                '<div class="flex items-center space-x-2">' +
-                  '<span class="text-xl">🛡️</span>' +
-                  '<div>' +
-                    '<h4 class="text-xs font-bold text-slate-800 uppercase font-display">Otomatik Günlük Sistem Yedekleri</h4>' +
-                    '<p class="text-[10px] text-slate-400">Sistem her gün otomatik olarak tam yedek alır ve cihazınızda/E-Tabloda arşivler.</p>' +
-                  '</div>' +
-                '</div>' +
-                '<span class="text-[9px] font-extrabold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-300">🟢 Otomatik Aktif</span>' +
+                '<span class="text-xs font-extrabold text-slate-800 uppercase font-display">Kayıtlı Ekip & Yetki Listesi (' + state.members.length + ')</span>' +
+                '<span class="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200">E-Tablo Senkronize</span>' +
               '</div>' +
-              '<button type="button" onclick="triggerManualDailyBackup()" class="w-full bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 active:scale-95 transition-all">' +
-                '<span>⚡ Bugünün Otomatik Yedeğini Şimdi Al / Yenile</span>' +
-              '</button>' +
-              '<div class="space-y-1.5 pt-1">' +
-                '<span class="text-[10px] font-bold text-slate-400 uppercase block">Arşivlenmiş Günlük Yedekler (Son 30 Gün):</span>' +
-                (state.autoBackups && state.autoBackups.length > 0
-                  ? state.autoBackups.slice(0, 7).map(function(b) {
-                      return '<div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex justify-between items-center text-xs">' +
-                        '<div>' +
-                          '<div class="flex items-center space-x-1.5">' +
-                            '<span class="font-extrabold text-slate-800">📅 ' + esc(b.displayDate) + '</span>' +
-                            '<span class="text-[9px] text-slate-400">' + esc(b.dateTime ? b.dateTime.split(' ')[1] || '' : '') + '</span>' +
-                          '</div>' +
-                          '<span class="text-[10px] text-slate-500 block mt-0.5">' + esc(b.summary) + '</span>' +
-                        '</div>' +
-                        '<div class="flex items-center space-x-1">' +
-                          '<button type="button" data-key="' + esc(b.dateKey) + '" onclick="downloadAutoBackup(this.getAttribute(\'data-key\'))" class="text-[10px] font-bold px-2 py-1 rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 active:scale-95">⬇️ İndir</button>' +
-                          '<button type="button" data-key="' + esc(b.dateKey) + '" onclick="restoreAutoBackup(this.getAttribute(\'data-key\'))" class="text-[10px] font-bold px-2 py-1 rounded-lg bg-amber-50 border border-amber-300 text-amber-800 hover:bg-amber-100 active:scale-95">🔄 Yükle</button>' +
-                        '</div>' +
-                      '</div>';
-                    }).join('')
-                  : '<div class="text-[11px] text-slate-400 italic bg-slate-50 p-2 rounded-xl text-center">Bugünün ilk otomatik yedeği alınıyor...</div>'
-                ) +
-              '</div>' +
+              '<div class="space-y-2.5">' + allMembersControlHTML + '</div>' +
             '</div>' +
           '</div>';
         }
 
-        // C. İŞLEM GÜNLÜĞÜ (Sadece Yönetici)
-        else if (isAdmin && state.adminSubTab === 'gunluk') {
+        // C. İŞLEM GÜNLÜĞÜ (LOG) & YÖNETİCİ LOG SİLME MERKEZİ
+        else if ((isAdmin || canViewLogsPerm) && state.adminSubTab === 'gunluk') {
+          var totalLogCount = (state.logs || []).length;
+          var qLog = (state.logSearchQuery || '').toLowerCase().trim();
+          var matchingLogCount = (state.logs || []).filter(function(l) {
+            if (!l) return false;
+            if (!qLog) return true;
+            return (l.author || '').toLowerCase().includes(qLog) || (l.action || '').toLowerCase().includes(qLog) || (l.details || '').toLowerCase().includes(qLog) || (l.date || '').toLowerCase().includes(qLog);
+          }).length;
+
+          // SADECE YÖNETİCİ İÇİN LOG SİLME VE TEMİZLEME ARAÇ ÇUBUĞU
+          var adminLogControlsHTML = isAdmin
+            ? '<div class="bg-white p-4 rounded-3xl border border-rose-200 shadow-sm space-y-2.5">' +
+                '<div class="flex items-center justify-between">' +
+                  '<div class="flex items-center space-x-1.5">' +
+                    '<span class="text-sm">🛡️</span>' +
+                    '<span class="text-[11px] font-extrabold text-slate-800 uppercase font-display">Yönetici Log (Günlük) Silme & Temizlik Araçları</span>' +
+                  '</div>' +
+                  '<span class="text-[10px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-200">Sadece Yönetici</span>' +
+                '</div>' +
+                '<div class="grid grid-cols-2 gap-2">' +
+                  '<button type="button" onclick="clearAllLogs()" class="bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs py-2.5 px-3 rounded-xl shadow-sm flex items-center justify-center space-x-1.5 active:scale-95 transition-all">' +
+                    '<span>🧹 Tüm Logları Sil (' + totalLogCount + ')</span>' +
+                  '</button>' +
+                  '<button type="button" onclick="trimOldLogs(20)" class="bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 font-extrabold text-xs py-2.5 px-3 rounded-xl flex items-center justify-center space-x-1 active:scale-95 transition-all">' +
+                    '<span>⏳ Son 20 Hariç Sil</span>' +
+                  '</button>' +
+                '</div>' +
+                '<div class="grid grid-cols-2 gap-2">' +
+                  (qLog
+                    ? '<button type="button" onclick="deleteFilteredLogs()" class="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-[11px] py-2 px-2.5 rounded-xl flex items-center justify-center space-x-1 active:scale-95 transition-all"><span>🗑️ Arananları Sil (' + matchingLogCount + ')</span></button>'
+                    : '<button type="button" onclick="exportLogsCSV()" class="bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-bold text-[11px] py-2 px-2.5 rounded-xl flex items-center justify-center space-x-1 active:scale-95 transition-all"><span>📊 Günlüğü İndir (.CSV)</span></button>'
+                  ) +
+                  '<button type="button" onclick="syncFromGoogleSheet(false)" class="bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 font-bold text-[11px] py-2 px-2.5 rounded-xl flex items-center justify-center space-x-1 active:scale-95 transition-all"><span>🔄 E-Tablo İle Eşitle</span></button>' +
+                '</div>' +
+              '</div>'
+            : '';
+
           html += '<div class="space-y-4">' +
-            '<div class="bg-blue-900 text-white p-4 rounded-3xl shadow-md">' +
-              '<span class="text-[10px] font-bold text-blue-300 uppercase tracking-wider">Güvenlik & Şeffaflık</span>' +
-              '<h3 class="text-lg font-extrabold font-display">Sistem İşlem Günlüğü (Log)</h3>' +
-              '<p class="text-xs text-blue-100">Ekip arkadaşlarının ve yöneticilerin yaptığı tüm hareketler.</p>' +
+            '<div class="bg-blue-950 text-white p-4 rounded-3xl shadow-md flex justify-between items-center">' +
+              '<div>' +
+                '<span class="text-[10px] font-bold text-blue-300 uppercase tracking-wider">Güvenlik & Denetim İzi (' + totalLogCount + ' Kayıt)</span>' +
+                '<h3 class="text-lg font-extrabold font-display">Sistem İşlem Günlüğü (Log)</h3>' +
+                '<p class="text-xs text-blue-100">Ekip üyelerinin yaptığı işlemler ve yönetici log temizleme merkezi.</p>' +
+              '</div>' +
             '</div>' +
-            '<input type="text" id="logSearchInput" placeholder="Kişi veya işlem ara..." value="' + esc(state.logSearchQuery || '') + '" oninput="onLogSearchType(this.value)" class="w-full bg-white border border-slate-200 rounded-2xl px-4 py-2.5 text-xs font-medium outline-none shadow-sm" />' +
+            adminLogControlsHTML +
+            '<input type="text" id="logSearchInput" placeholder="Kişi, tarih veya işlem ara..." value="' + esc(state.logSearchQuery || '') + '" oninput="onLogSearchType(this.value)" class="w-full bg-white border border-slate-200 rounded-2xl px-4 py-2.5 text-xs font-medium outline-none shadow-sm" />' +
             '<div id="logsListContainer" class="space-y-2">' + renderLogsListHTML() + '</div>' +
+          '</div>';
+        }
+
+        // D. KAPSAMLI YÖNETİCİ KONTROL PANELİ (SİSTEM AYARLARI & E-TABLO MERKEZİ - Sadece Yönetici)
+        else if (isAdmin && state.adminSubTab === 'panel') {
+          var sec = state.adminPanelSection || 'tumu';
+          var allCats = getAllEmanetCategories();
+
+          var panelFilterPillsHTML = '<div class="flex space-x-1.5 overflow-x-auto hide-scrollbar pb-1">' +
+            [
+              { key: 'tumu', label: '🎛️ Tümü' },
+              { key: 'kurum', label: '📢 Duyuru & Kurum' },
+              { key: 'kategoriler', label: '📦 Kategoriler' },
+              { key: 'guvenlik', label: '🛡️ Güvenlik & Yetki' },
+              { key: 'medya', label: '📸 Kamera & Şablon' },
+              { key: 'veritabani', label: '🗄️ E-Tablo & Yedek' }
+            ].map(function(f) {
+              var isSel = sec === f.key;
+              return '<button type="button" onclick="setAdminPanelSection(\'' + f.key + '\')" class="whitespace-nowrap px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all ' + (isSel ? 'bg-slate-900 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50') + '">' + f.label + '</button>';
+            }).join('') +
+          '</div>';
+
+          // ÜST ÖZET & CANLI KONTROL KARTI
+          var panelDashboardHTML = '<div class="bg-gradient-to-br from-slate-900 via-emerald-950 to-slate-900 text-white p-5 rounded-3xl shadow-xl space-y-4">' +
+            '<div class="flex justify-between items-start">' +
+              '<div>' +
+                '<span class="text-[10px] font-extrabold text-emerald-400 uppercase tracking-wider block">🛠️ Yönetici Kontrol Merkezi • E-Tablo Entegre</span>' +
+                '<h2 class="text-xl font-extrabold font-display mt-0.5">Sistem Yönetim Paneli</h2>' +
+                '<p class="text-[11px] text-slate-300 mt-0.5">Yapılan tüm ayar değişiklikleri Google E-Tablonuza kaydedilir ve tüm telefonlara anında yansır.</p>' +
+              '</div>' +
+              '<span class="text-[10px] font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2.5 py-1 rounded-full shrink-0">Canlı Aktif</span>' +
+            '</div>' +
+            '<div class="grid grid-cols-3 gap-2 text-center">' +
+              '<div class="bg-white/10 p-2.5 rounded-2xl border border-white/10"><span class="text-[9px] text-slate-300 uppercase font-bold block">Haneler</span><span class="text-lg font-extrabold font-display text-white">' + state.aids.length + '</span></div>' +
+              '<div class="bg-white/10 p-2.5 rounded-2xl border border-white/10"><span class="text-[9px] text-emerald-300 uppercase font-bold block">Net Sandık</span><span class="text-sm font-extrabold font-display text-emerald-300">' + toplamKalan.toLocaleString('tr-TR') + ' ₺</span></div>' +
+              '<div class="bg-white/10 p-2.5 rounded-2xl border border-white/10"><span class="text-[9px] text-blue-300 uppercase font-bold block">Ekip / Log</span><span class="text-sm font-extrabold font-display text-white">' + state.members.length + ' / ' + state.logs.length + '</span></div>' +
+            '</div>' +
+            '<div class="grid grid-cols-2 gap-2 pt-1">' +
+              '<button type="button" onclick="syncFromGoogleSheet(false)" class="bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs py-2.5 rounded-xl shadow flex items-center justify-center space-x-1 active:scale-95 transition-all"><span>🔄 E-Tablo Şimdi Eşitle</span></button>' +
+              '<button type="button" onclick="triggerManualDailyBackup()" class="bg-white/15 hover:bg-white/25 text-white font-extrabold text-xs py-2.5 rounded-xl border border-white/20 flex items-center justify-center space-x-1 active:scale-95 transition-all"><span>💾 Anlık Yedek Al</span></button>' +
+            '</div>' +
+          '</div>';
+
+          // BÖLÜM 1: SAHA DUYURU PANOSU & KURUM KİMLİĞİ
+          var sectionKurumHTML = (sec === 'tumu' || sec === 'kurum') ? (
+            // 1A. CANLI SAHA DUYURU PANOSU
+            '<form onsubmit="saveAnnouncementSettings(event)" class="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-3.5">' +
+              '<div class="flex items-center justify-between">' +
+                '<div class="flex items-center space-x-2">' +
+                  '<span class="text-xl">📢</span>' +
+                  '<div><h4 class="text-xs font-extrabold text-slate-900 uppercase font-display">Saha Duyuru & Acil Bildirim Panosu</h4><p class="text-[10px] text-slate-400">Ana ekranda tüm gönüllülerin en üstte göreceği sabit duyuru.</p></div>' +
+                '</div>' +
+                '<label class="inline-flex items-center space-x-1.5 cursor-pointer bg-slate-100 px-2.5 py-1 rounded-xl border border-slate-200">' +
+                  '<input type="checkbox" id="panelAnnActive" ' + (st.announcementActive ? 'checked' : '') + ' class="accent-emerald-600 w-4 h-4 rounded" />' +
+                  '<span class="text-[10px] font-extrabold text-slate-700">Aktif</span>' +
+                '</label>' +
+              '</div>' +
+              '<div class="grid grid-cols-2 gap-2">' +
+                '<div><label class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Duyuru Önem Türü</label>' +
+                  '<select id="panelAnnType" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none">' +
+                    '<option value="info" ' + (st.announcementType === 'info' ? 'selected' : '') + '>🟢 Normal Bilgilendirme</option>' +
+                    '<option value="warning" ' + (st.announcementType === 'warning' ? 'selected' : '') + '>⚠️ Önemli Hatırlatma</option>' +
+                    '<option value="urgent" ' + (st.announcementType === 'urgent' ? 'selected' : '') + '>🚨 Acil Saha Çağrısı</option>' +
+                  '</select>' +
+                '</div>' +
+                '<div><label class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Duyuru Başlığı</label>' +
+                  '<input id="panelAnnTitle" value="' + esc(st.announcementTitle || '') + '" placeholder="Örn: Hafta Sonu Erzak Dağıtımı" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:bg-white" />' +
+                '</div>' +
+              '</div>' +
+              '<div><label class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Duyuru Metni / Görev Notu</label>' +
+                '<textarea id="panelAnnText" rows="2" placeholder="Tüm gönüllü kardeşlerimizin ana ekranında görünecek mesaj..." class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-medium outline-none focus:bg-white">' + esc(st.announcementText || '') + '</textarea>' +
+              '</div>' +
+              '<div class="grid grid-cols-2 gap-2">' +
+                '<button type="submit" class="bg-emerald-800 hover:bg-emerald-900 text-white font-extrabold text-xs py-2.5 rounded-xl shadow active:scale-95 transition-all">📢 Duyuruyu Yayınla</button>' +
+                '<button type="button" onclick="clearAnnouncement()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-2.5 rounded-xl border border-slate-200 active:scale-95 transition-all">🔇 Duyuruyu Kaldır</button>' +
+              '</div>' +
+            '</form>' +
+
+            // 1B. KURUM KİMLİĞİ, VARSAYILAN ŞEHİR VE RESMİ IBAN AYARLARI
+            '<form onsubmit="saveGeneralSettings(event)" class="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-3.5">' +
+              '<div class="flex items-center space-x-2">' +
+                '<span class="text-xl">🏛️</span>' +
+                '<div><h4 class="text-xs font-extrabold text-slate-900 uppercase font-display">Kurum Kimliği, Bölge & Resmi IBAN Ayarları</h4><p class="text-[10px] text-slate-400">Uygulama adı, varsayılan il/ilçe ve Sandık IBAN bilgisi.</p></div>' +
+              '</div>' +
+              '<div class="grid grid-cols-2 gap-2">' +
+                '<div><label class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Uygulama Başlığı</label><input id="panelAppTitle" required value="' + esc(st.appTitle || 'Hâre') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:bg-white" /></div>' +
+                '<div><label class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Alt Başlık</label><input id="panelAppSubtitle" value="' + esc(st.appSubtitle || 'İnsani Yardım Halkası') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:bg-white" /></div>' +
+              '</div>' +
+              '<div><label class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Kurum Tanımı / Üst Açıklama</label><input id="panelOrgDesc" value="' + esc(st.orgDescription || '') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
+              '<div><label class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Giriş Ayet / Slogan Metni</label><input id="panelOrgMotto" value="' + esc(st.orgMotto || '') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
+              '<div class="grid grid-cols-3 gap-2">' +
+                '<div><label class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Varsayılan İl</label><input id="panelDefaultCity" value="' + esc(st.defaultCity || 'Kayseri') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:bg-white" /></div>' +
+                '<div><label class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Varsayılan İlçe</label><input id="panelDefaultDistrict" value="' + esc(st.defaultDistrict || '') + '" placeholder="Örn: Melikgazi" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:bg-white" /></div>' +
+                '<div><label class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Para Birimi</label><input id="panelCurrency" value="' + esc(st.currencySymbol || '₺') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold text-center outline-none focus:bg-white" /></div>' +
+              '</div>' +
+              '<div class="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100">' +
+                '<div><label class="text-[10px] font-bold text-emerald-800 uppercase block mb-1">🏦 Resmi Emanet IBAN No</label><input id="panelOrgIban" value="' + esc(st.orgIban || '') + '" placeholder="TR00 0000 0000 0000..." class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-mono font-bold outline-none focus:bg-white" /></div>' +
+                '<div><label class="text-[10px] font-bold text-emerald-800 uppercase block mb-1">👤 IBAN Alıcı Adı Soyadı</label><input id="panelOrgIbanHolder" value="' + esc(st.orgIbanHolder || '') + '" placeholder="Örn: Muhammet ..." class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:bg-white" /></div>' +
+              '</div>' +
+              '<button type="submit" class="w-full bg-emerald-800 hover:bg-emerald-900 text-white font-extrabold text-xs py-3 rounded-xl shadow active:scale-95 transition-all">💾 Kurum & Bölge Ayarlarını E-Tabloya Kaydet</button>' +
+            '</form>'
+          ) : '';
+
+          // BÖLÜM 2: EMANET & İHTİYAÇ KATEGORİLERİ YÖNETİMİ
+          var sectionKategorilerHTML = (sec === 'tumu' || sec === 'kategoriler') ? (
+            '<div class="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-3.5">' +
+              '<div class="flex justify-between items-center">' +
+                '<div class="flex items-center space-x-2">' +
+                  '<span class="text-xl">📦</span>' +
+                  '<div><h4 class="text-xs font-extrabold text-slate-900 uppercase font-display">Emanet Türü (İhtiyaç Kalemleri) Yönetimi</h4><p class="text-[10px] text-slate-400">Hane ekleme ve düzenleme ekranındaki ihtiyaç kategorilerini özelleştirin.</p></div>' +
+                '</div>' +
+                '<span class="text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200">' + allCats.length + ' Kalem</span>' +
+              '</div>' +
+              '<div class="flex flex-wrap gap-1.5">' +
+                allCats.map(function(c) {
+                  return '<div class="inline-flex items-center space-x-1.5 bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded-xl text-xs font-bold text-slate-800">' +
+                    '<span>' + esc(c.label) + '</span>' +
+                    '<button type="button" data-val="' + esc(c.value) + '" onclick="removeCategoryItem(this.getAttribute(\'data-val\'))" title="Bu Kategoriyi Kaldır" class="text-rose-500 hover:text-rose-700 font-extrabold text-xs ml-1 px-1">✕</button>' +
+                  '</div>';
+                }).join('') +
+              '</div>' +
+              '<form onsubmit="addCustomCategory(event)" class="grid grid-cols-4 gap-2 pt-2 border-t border-slate-100">' +
+                '<input id="newCatEmojiInput" placeholder="🍼" maxlength="4" class="col-span-1 bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-center text-sm font-bold outline-none focus:bg-white" />' +
+                '<input id="newCatNameInput" required placeholder="Yeni Kategori (Örn: Bebek / Mama)" class="col-span-2 bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:bg-white" />' +
+                '<button type="submit" class="col-span-1 bg-emerald-800 hover:bg-emerald-900 text-white font-extrabold text-xs rounded-xl shadow active:scale-95">➕ Ekle</button>' +
+              '</form>' +
+              '<button type="button" onclick="resetCategoriesToDefault()" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-[11px] py-2 rounded-xl border border-slate-200 active:scale-95 transition-all">🔄 Varsayılan 10 Kategoriyi Geri Yükle</button>' +
+            '</div>'
+          ) : '';
+
+          // BÖLÜM 3: GÜVENLİK, ERİŞİM POLİTİKALARI & BAKIM MODU
+          var sectionGuvenlikHTML = (sec === 'tumu' || sec === 'guvenlik') ? (
+            '<div class="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-3.5">' +
+              '<div class="flex items-center space-x-2">' +
+                '<span class="text-xl">🛡️</span>' +
+                '<div><h4 class="text-xs font-extrabold text-slate-900 uppercase font-display">Güvenlik, Genel Yetki & Sistem Politikaları</h4><p class="text-[10px] text-slate-400">Gönüllü erişim sınırlarını, mükerrer kontrolünü ve bakım kilidini yönetin.</p></div>' +
+              '</div>' +
+              '<div class="space-y-2">' +
+                [
+                  { key: 'maintenanceMode', title: '🔒 Bakım (Salt-Okunur) Kilit Modu', desc: 'Açıldığında yöneticiler hariç gönüllüler veri ekleyemez/değiştiremez', danger: true },
+                  { key: 'duplicateCheckEnabled', title: '⚠️ Mükerrer (Çift) Hane Kayıt Uyarısı', desc: 'Aynı telefon veya isimle ikinci kez hane girilirken uyarır' },
+                  { key: 'forcePrivacyOnStart', title: '👁️ Açılışta Otomatik Mahremiyet Modu', desc: 'Uygulama açıldığında isimler ve tutarlar gizli (maskeli) başlar' },
+                  { key: 'membersCanViewKasa', title: '🗳️ Gönüllüler Genel Sandık Bakiyesini Görsün', desc: 'Kapatılırsa gönüllüler yalnızca kendi zimmet kasasını görebilir' },
+                  { key: 'membersCanViewDonors', title: '🤝 Gönüllüler Hayırseverler Listesini Görsün', desc: 'Kapatılırsa hayırsever listesini yalnızca yetkililer görebilir' },
+                  { key: 'membersCanEditAids', title: '✏️ Tüm Gönüllülere Hane Düzenleme Yetkisi Ver', desc: 'Açılırsa tüm saha gönüllüleri hane bilgilerini düzenleyebilir' },
+                  { key: 'membersCanManageKasa', title: '💵 Tüm Gönüllülere Kasa Düzenleme Yetkisi Ver', desc: 'Açılırsa tüm gönüllüler sandık kayıtlarını düzenleyebilir' }
+                ].map(function(pol) {
+                  var isOn = Boolean(st[pol.key]);
+                  return '<div class="flex items-center justify-between p-3 rounded-2xl border ' + (pol.danger && isOn ? 'bg-rose-50 border-rose-300' : 'bg-slate-50 border-slate-200') + '">' +
+                    '<div class="pr-2">' +
+                      '<span class="text-xs font-extrabold text-slate-800 block">' + pol.title + '</span>' +
+                      '<span class="text-[10px] text-slate-500 block mt-0.5">' + pol.desc + '</span>' +
+                    '</div>' +
+                    '<button type="button" onclick="togglePolicySetting(\'' + pol.key + '\')" class="px-3 py-1.5 rounded-xl text-[10px] font-extrabold shrink-0 transition-all active:scale-95 ' + (isOn ? (pol.danger ? 'bg-rose-600 text-white shadow' : 'bg-emerald-700 text-white shadow') : 'bg-slate-200 text-slate-600') + '">' +
+                      (isOn ? 'AÇIK' : 'KAPALI') +
+                    '</button>' +
+                  '</div>';
+                }).join('') +
+              '</div>' +
+              '<form onsubmit="saveSecuritySettings(event)" class="grid grid-cols-2 gap-2 pt-2 border-t border-slate-100">' +
+                '<div><label class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Varsayılan Üye PIN Kodu</label><input id="panelDefaultPin" maxlength="4" required value="' + esc(st.defaultPin || '1453') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-extrabold text-center tracking-widest outline-none focus:bg-white" /></div>' +
+                '<div><label class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Otomatik Eşitleme Süresi</label>' +
+                  '<select id="panelSyncInterval" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none">' +
+                    '<option value="15" ' + (Number(st.autoSyncIntervalSec) === 15 ? 'selected' : '') + '>⚡ 15 Saniye (Hızlı)</option>' +
+                    '<option value="30" ' + (Number(st.autoSyncIntervalSec) === 30 ? 'selected' : '') + '>🔄 30 Saniye (Standart)</option>' +
+                    '<option value="60" ' + (Number(st.autoSyncIntervalSec) === 60 ? 'selected' : '') + '>🔋 60 Saniye (Pil Dostu)</option>' +
+                  '</select>' +
+                '</div>' +
+                '<button type="submit" class="col-span-2 bg-emerald-800 hover:bg-emerald-900 text-white font-extrabold text-xs py-2.5 rounded-xl shadow active:scale-95">💾 PIN ve Eşitleme Ayarını Kaydet</button>' +
+              '</form>' +
+            '</div>'
+          ) : '';
+
+          // BÖLÜM 4: KAMERA, FOTOĞRAF KALİTESİ & WHATSAPP ŞABLONLARI
+          var sectionMedyaHTML = (sec === 'tumu' || sec === 'medya') ? (
+            '<form onsubmit="saveMediaAndTemplateSettings(event)" class="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-3.5">' +
+              '<div class="flex items-center space-x-2">' +
+                '<span class="text-xl">📸</span>' +
+                '<div><h4 class="text-xs font-extrabold text-slate-900 uppercase font-display">Kamera Kalitesi & WhatsApp Mesaj Şablonları</h4><p class="text-[10px] text-slate-400">Fotoğraf çözünürlüğü ve hayırsever teşekkür mesajı şablonları.</p></div>' +
+              '</div>' +
+              '<div class="grid grid-cols-2 gap-2">' +
+                '<div><label class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Fotoğraf Çözünürlük Modu</label>' +
+                  '<select id="panelPhotoPreset" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none">' +
+                    '<option value="ultra" ' + (st.photoQualityPreset === 'ultra' ? 'selected' : '') + '>💎 Ultra HD (1440px %88)</option>' +
+                    '<option value="hd" ' + (st.photoQualityPreset === 'hd' ? 'selected' : '') + '>✨ Net HD (1280px %85)</option>' +
+                    '<option value="eco" ' + (st.photoQualityPreset === 'eco' ? 'selected' : '') + '>🌿 Tasarruf (960px %75)</option>' +
+                  '</select>' +
+                '</div>' +
+                '<div><label class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Hane Başına Maks. Fotoğraf</label>' +
+                  '<select id="panelMaxPhotos" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none">' +
+                    '<option value="2" ' + (Number(st.maxPhotosPerAid) === 2 ? 'selected' : '') + '>2 Fotoğraf</option>' +
+                    '<option value="3" ' + (Number(st.maxPhotosPerAid) === 3 ? 'selected' : '') + '>3 Fotoğraf (Önerilen)</option>' +
+                    '<option value="4" ' + (Number(st.maxPhotosPerAid) === 4 ? 'selected' : '') + '>4 Fotoğraf</option>' +
+                  '</select>' +
+                '</div>' +
+              '</div>' +
+              '<label class="flex items-center space-x-2 text-xs font-bold text-slate-700 bg-slate-50 p-2.5 rounded-xl border border-slate-200 cursor-pointer">' +
+                '<input type="checkbox" id="panelAutoDeliveryStatus" ' + (st.autoStatusOnDeliveryPhoto !== false ? 'checked' : '') + ' class="accent-emerald-600 w-4 h-4 rounded" />' +
+                '<span>Teslimat fotoğrafı yüklenince durumu otomatik "✅ Ulaştırıldı" yap</span>' +
+              '</label>' +
+              '<div class="pt-1 border-t border-slate-100 space-y-2">' +
+                '<div><label class="text-[10px] font-bold text-emerald-800 uppercase block mb-1">💬 WhatsApp Makbuz Başlığı</label><input id="panelReceiptHeader" value="' + esc(st.receiptHeader || '') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:bg-white" /></div>' +
+                '<div><label class="text-[10px] font-bold text-emerald-800 uppercase block mb-1">🤲 WhatsApp Teşekkür & Dua Metni</label><textarea id="panelReceiptFooter" rows="3" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-medium outline-none focus:bg-white">' + esc(st.receiptFooter || '') + '</textarea></div>' +
+                '<div><label class="text-[10px] font-bold text-slate-500 uppercase block mb-1">📢 Hane Paylaşım Kartı Alt İmzası</label><input id="panelShareFooter" value="' + esc(st.shareCardFooter || '') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
+              '</div>' +
+              '<button type="submit" class="w-full bg-emerald-800 hover:bg-emerald-900 text-white font-extrabold text-xs py-3 rounded-xl shadow active:scale-95 transition-all">💾 Kamera & Mesaj Şablonlarını Kaydet</button>' +
+            '</form>'
+          ) : '';
+
+          // BÖLÜM 5: E-TABLO VERİTABANI KÖPRÜSÜ, YEDEKLEME VE SİSTEM TEMİZLİĞİ
+          var sectionVeritabaniHTML = (sec === 'tumu' || sec === 'veritabani') ? (
+            '<div class="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-3">' +
+              '<div class="flex items-center justify-between">' +
+                '<div class="flex items-center space-x-2">' +
+                  '<span class="text-xl">🔗</span>' +
+                  '<div><h4 class="text-xs font-extrabold text-slate-900 uppercase font-display">Google E-Tablo Veritabanı Köprüsü</h4><p class="text-[10px] text-slate-400">Canlı senkronizasyon Web App URL ve Apps Script kurulum kodu.</p></div>' +
+                '</div>' +
+              '</div>' +
+              '<div><input id="sheetUrlInput" value="' + esc(state.sheetUrl) + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white text-slate-700" placeholder="https://script.google.com/macros/s/.../exec" /></div>' +
+              '<div class="grid grid-cols-2 gap-2">' +
+                '<button type="button" onclick="saveSheetUrl()" class="bg-emerald-800 hover:bg-emerald-900 text-white font-extrabold text-xs py-2.5 rounded-xl shadow active:scale-95 transition-all">💾 Linki Kaydet & Eşitle</button>' +
+                '<button type="button" onclick="testSheetConnection()" class="bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-200 font-extrabold text-xs py-2.5 rounded-xl active:scale-95 transition-all">⚡ Bağlantıyı Test Et</button>' +
+              '</div>' +
+              '<div class="grid grid-cols-2 gap-2">' +
+                '<button type="button" onclick="openAppsScriptModal()" class="bg-slate-900 hover:bg-slate-800 text-white font-bold text-[11px] py-2.5 rounded-xl active:scale-95 transition-all">📋 Apps Script Kodunu Gör</button>' +
+                '<button type="button" onclick="resetSheetUrl()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] py-2.5 rounded-xl border border-slate-200 active:scale-95 transition-all">🔄 Varsayılan Linke Dön</button>' +
+              '</div>' +
+            '</div>' +
+
+            '<div class="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-3.5">' +
+              '<div class="flex items-center space-x-2.5">' +
+                '<span class="text-xl">💾</span>' +
+                '<div><h4 class="text-xs font-extrabold text-slate-900 uppercase font-display">Veri Yedekleme, Excel Rapor & Geri Yükleme</h4><p class="text-[10px] text-slate-400">Tüm tabloları Excel (.CSV) veya tam sistem yedeği (.JSON) olarak indirin.</p></div>' +
+              '</div>' +
+              '<div class="grid grid-cols-2 gap-2">' +
+                '<button type="button" onclick="exportBackupJSON()" class="bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 py-3 rounded-2xl text-xs font-extrabold flex flex-col items-center justify-center space-y-0.5 active:scale-95 transition-all shadow-xs">' +
+                  '<span class="text-base">📦</span><span>Tam Sistem Yedeği</span><span class="text-[9px] text-emerald-700 font-bold">(.JSON İndir)</span>' +
+                '</button>' +
+                '<button type="button" onclick="exportAidsCSV()" class="bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-200 py-3 rounded-2xl text-xs font-extrabold flex flex-col items-center justify-center space-y-0.5 active:scale-95 transition-all shadow-xs">' +
+                  '<span class="text-base">📊</span><span>Haneler Tablosu</span><span class="text-[9px] text-blue-700 font-bold">(Excel .CSV)</span>' +
+                '</button>' +
+                '<button type="button" onclick="exportBudgetCSV()" class="bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 py-2.5 rounded-2xl text-xs font-extrabold flex items-center justify-center space-x-1 active:scale-95 transition-all">' +
+                  '<span>🗳️ Sandık (.CSV)</span>' +
+                '</button>' +
+                '<button type="button" onclick="exportDonorsCSV()" class="bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 py-2.5 rounded-2xl text-xs font-extrabold flex items-center justify-center space-x-1 active:scale-95 transition-all">' +
+                  '<span>🤝 Hayırsever (.CSV)</span>' +
+                '</button>' +
+              '</div>' +
+              '<button type="button" onclick="exportLogsCSV()" class="w-full bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 active:scale-95 transition-all">' +
+                '<span>📜 İşlem Günlüğü / Log Kayıtlarını İndir (.CSV)</span>' +
+              '</button>' +
+              '<div class="pt-2 border-t border-slate-100 space-y-1.5">' +
+                '<label class="text-[11px] font-bold text-slate-600 block">📥 Yedekten Geri Yükle (.JSON Dosyası Seç):</label>' +
+                '<input type="file" id="backupFileInput" accept=".json" onchange="importBackupJSON(event)" class="text-xs text-slate-500 file:mr-2 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-emerald-800 file:text-white hover:file:bg-emerald-900 cursor-pointer w-full bg-slate-50 p-1.5 rounded-xl border border-slate-200" />' +
+              '</div>' +
+            '</div>' +
+
+            '<div class="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-3">' +
+              '<div class="flex justify-between items-center">' +
+                '<div class="flex items-center space-x-2">' +
+                  '<span class="text-xl">🛡️</span>' +
+                  '<div><h4 class="text-xs font-extrabold text-slate-900 uppercase font-display">Otomatik Günlük Sistem Yedekleri</h4><p class="text-[10px] text-slate-400">Son 30 günün otomatik yedek arşivi.</p></div>' +
+                '</div>' +
+                '<span class="text-[9px] font-extrabold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-300">🟢 Aktif</span>' +
+              '</div>' +
+              '<div class="space-y-1.5 pt-1">' +
+                (state.autoBackups && state.autoBackups.length > 0
+                  ? state.autoBackups.slice(0, 5).map(function(b) {
+                      return '<div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex justify-between items-center text-xs">' +
+                        '<div><span class="font-extrabold text-slate-800">📅 ' + esc(b.displayDate) + '</span><span class="text-[10px] text-slate-500 block">' + esc(b.summary) + '</span></div>' +
+                        '<div class="flex items-center space-x-1">' +
+                          '<button type="button" data-key="' + esc(b.dateKey) + '" onclick="downloadAutoBackup(this.getAttribute(\'data-key\'))" class="text-[10px] font-bold px-2 py-1 rounded-lg bg-white border border-slate-200 text-slate-700">⬇️ İndir</button>' +
+                          '<button type="button" data-key="' + esc(b.dateKey) + '" onclick="restoreAutoBackup(this.getAttribute(\'data-key\'))" class="text-[10px] font-bold px-2 py-1 rounded-lg bg-amber-50 border border-amber-300 text-amber-800">🔄 Yükle</button>' +
+                        '</div>' +
+                      '</div>';
+                    }).join('')
+                  : '<div class="text-[11px] text-slate-400 italic bg-slate-50 p-2 rounded-xl text-center">Henüz yedek alınmadı.</div>'
+                ) +
+              '</div>' +
+            '</div>' +
+
+            // TEHLİKELİ BÖLGE / YÖNETİCİ TOPLU TEMİZLİK MERKEZİ
+            '<div class="bg-rose-50/70 p-5 rounded-3xl border border-rose-200 shadow-sm space-y-3">' +
+              '<div class="flex items-center space-x-2">' +
+                '<span class="text-xl">⚠️</span>' +
+                '<div><h4 class="text-xs font-extrabold text-rose-900 uppercase font-display">Yönetici Toplu Temizlik & Bakım İşlemleri</h4><p class="text-[10px] text-rose-700">Bu işlemler onay sorarak çalışır ve doğrudan Google E-Tablonuza işlenir.</p></div>' +
+              '</div>' +
+              '<div class="space-y-2">' +
+                '<button type="button" onclick="clearAllLogs()" class="w-full bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs py-3 rounded-xl shadow flex items-center justify-center space-x-1.5 active:scale-95 transition-all"><span>🧹 Tüm İşlem Günlüğü (Log) Kayıtlarını Temizle (' + state.logs.length + ' Log)</span></button>' +
+                '<button type="button" onclick="archiveDeliveredAids()" class="w-full bg-white hover:bg-rose-100 text-rose-800 border border-rose-300 font-bold text-xs py-2.5 rounded-xl flex items-center justify-center space-x-1.5 active:scale-95 transition-all"><span>✅ "Teslim Edildi" Durumundaki Haneleri Listeden Temizle</span></button>' +
+                '<button type="button" onclick="resetDeletedIdsCache()" class="w-full bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-bold text-xs py-2.5 rounded-xl flex items-center justify-center space-x-1.5 active:scale-95 transition-all"><span>🔄 Cihaz Silinenler Engel Listesini Sıfırla & Yeniden Çek</span></button>' +
+              '</div>' +
+            '</div>'
+          ) : '';
+
+          html += '<div class="space-y-4">' +
+            panelDashboardHTML +
+            panelFilterPillsHTML +
+            sectionKurumHTML +
+            sectionKategorilerHTML +
+            sectionGuvenlikHTML +
+            sectionMedyaHTML +
+            sectionVeritabaniHTML +
           '</div>';
         }
 
@@ -2718,7 +3368,7 @@
         var photosGallery = (photosArr.length > 0) ? '<div><span class="font-bold text-slate-700 block uppercase text-[10px] mb-1.5">📸 Saha Fotoğrafları (' + photosArr.length + ' adet - Büyütmek ve indirmek için dokunun):</span><div class="grid grid-cols-3 gap-2">' + photosArr.map(function(p) { var s = safePhoto(p); return '<div onclick="openPhotoModal(\'' + s + '\')" class="cursor-pointer relative group rounded-xl overflow-hidden border border-slate-200 shadow-sm active:scale-95 transition-all"><img src="' + s + '" class="w-full h-24 object-cover ' + (state.privacyMode ? 'filter blur-md' : '') + '" /><div class="absolute inset-0 bg-black/25 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-[10px] font-bold transition-opacity">🔍 İncele / İndir</div></div>'; }).join('') + '</div></div>' : '';
         var cleanAidPhone = cleanPhone(selectedAid.phone);
         var displayPhone = cleanAidPhone ? (state.privacyMode ? maskPhone(cleanAidPhone) : cleanAidPhone) : 'Telefon Eklenmedi';
-        var adminAidBtns = isAdmin ? '<div class="grid grid-cols-2 gap-2 pt-2 border-t"><button type="button" data-id="' + esc(selectedAid.id) + '" onclick="openEditAid(this.getAttribute(\'data-id\'))" class="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs py-2.5 rounded-xl border border-slate-200">✏️ Bilgileri Düzenle</button><button type="button" data-id="' + esc(selectedAid.id) + '" onclick="deleteAid(this.getAttribute(\'data-id\'))" class="bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold text-xs py-2.5 rounded-xl border border-rose-200">🗑️ Kaydı Sil</button></div>' : '';
+        var adminAidBtns = canEditAidsPerm ? '<div class="grid grid-cols-2 gap-2 pt-2 border-t"><button type="button" data-id="' + esc(selectedAid.id) + '" onclick="openEditAid(this.getAttribute(\'data-id\'))" class="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs py-2.5 rounded-xl border border-slate-200">✏️ Bilgileri Düzenle</button><button type="button" data-id="' + esc(selectedAid.id) + '" onclick="deleteAid(this.getAttribute(\'data-id\'))" class="bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold text-xs py-2.5 rounded-xl border border-rose-200">🗑️ Kaydı Sil</button></div>' : '';
 
         // Durum rozeti
         var badgeColor = 'bg-slate-100 text-slate-700';
@@ -2781,7 +3431,7 @@
                 ? '<div class="bg-emerald-50/80 p-3 rounded-2xl border border-emerald-200 space-y-2"><div class="flex justify-between items-center"><span class="font-bold text-emerald-900 block uppercase text-[10px] flex items-center space-x-1"><span>✅ Ulaştırma & Teslimat Kanıtı</span><span class="text-emerald-700">(' + delPhotosArr.length + ' Fotoğraf)</span></span><span class="text-[9px] font-extrabold bg-emerald-200/80 text-emerald-900 px-2 py-0.5 rounded-full">Teslim Edildi</span></div><div class="grid grid-cols-3 gap-2">' +
                     delPhotosArr.map(function(p, dIdx) {
                       var s = safePhoto(p);
-                      var delBtn = isAdmin ? '<button type="button" onclick="event.stopPropagation(); removeDeliveryPhoto(\'' + esc(selectedAid.id) + '\', ' + dIdx + ')" class="absolute top-1 right-1 w-5 h-5 bg-rose-600/90 text-white rounded-full text-[10px] font-bold flex items-center justify-center shadow">✕</button>' : '';
+                      var delBtn = canEditAidsPerm ? '<button type="button" onclick="event.stopPropagation(); removeDeliveryPhoto(\'' + esc(selectedAid.id) + '\', ' + dIdx + ')" class="absolute top-1 right-1 w-5 h-5 bg-rose-600/90 text-white rounded-full text-[10px] font-bold flex items-center justify-center shadow">✕</button>' : '';
                       return '<div onclick="openPhotoModal(\'' + s + '\')" class="cursor-pointer relative group rounded-xl overflow-hidden border border-emerald-300 shadow-sm active:scale-95 transition-all"><img src="' + s + '" class="w-full h-24 object-cover ' + (state.privacyMode ? 'filter blur-md' : '') + '" />' + delBtn + '</div>';
                     }).join('') +
                   '</div></div>'
@@ -2831,8 +3481,8 @@
         '</div>';
       }
 
-            // MODAL 2: HANE DÜZENLEME PENCERESİ (İl / İlçe / Mahalle + Sadeleştirilmiş Emanet Türü + Fotoğraf Yönetimi)
-      if (isAdmin && editingAid) {
+      // MODAL 2: HANE DÜZENLEME PENCERESİ (İl / İlçe / Mahalle + Sadeleştirilmiş Emanet Türü + Fotoğraf Yönetimi)
+      if (canEditAidsPerm && editingAid) {
         var normEditingCats = normalizeCategoryArray(editingAid.category);
         var editPhotosList = Array.isArray(state.editPhotos) ? state.editPhotos : [];
         var editPhotosPreviewHTML = editPhotosList.map(function(p, idx) {
@@ -2845,7 +3495,7 @@
             '<div class="flex justify-between items-center pb-2 border-b"><h3 class="font-extrabold text-slate-900 text-base font-display">Hane Bilgilerini Düzenle</h3><button type="button" onclick="closeEditAid()" class="px-3 py-1 bg-slate-100 hover:bg-slate-200 rounded-xl font-extrabold text-slate-600 text-xs">← Geri</button></div>' +
             '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Hane Adı / Rumuz</label><input id="editAidName" required value="' + esc(editingAid.name) + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:bg-white" /></div>' +
             '<div class="grid grid-cols-3 gap-2">' +
-              '<div><label class="text-[11px] font-bold text-slate-500 uppercase">İl</label><input id="editAidCity" required value="' + esc(editingAid.city || 'Kayseri') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" placeholder="İl" /></div>' +
+              '<div><label class="text-[11px] font-bold text-slate-500 uppercase">İl</label><input id="editAidCity" required value="' + esc(editingAid.city || st.defaultCity || 'Kayseri') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" placeholder="İl" /></div>' +
               '<div><label class="text-[11px] font-bold text-slate-500 uppercase">İlçe</label><input id="editAidDistrict" required value="' + esc(editingAid.district) + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" placeholder="İlçe" /></div>' +
               '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Mahalle</label><input id="editAidNeighborhood" required value="' + esc(editingAid.neighborhood) + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
             '</div>' +
@@ -2856,7 +3506,7 @@
             '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Açık Adres</label><textarea id="editAidAddress" rows="2" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-medium outline-none focus:bg-white">' + esc(editingAid.address || '') + '</textarea></div>' +
             '<div><div class="flex justify-between items-center mb-1"><label class="text-[11px] font-bold text-slate-500 uppercase">Harita Linki</label><div class="flex items-center space-x-1.5"><button type="button" onclick="getCurrentLocation(\'editAidMapsUrl\', this)" class="text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-lg font-bold hover:bg-emerald-100 active:scale-95">📍 Konumu Yenile</button><button type="button" onclick="generateMapLinkFromAddress(\'editAidMapsUrl\')" class="text-[10px] bg-blue-50 text-blue-900 border border-blue-200 px-2 py-0.5 rounded-lg font-bold hover:bg-blue-100 active:scale-95">🗺️ Adresten Üret</button></div></div><input id="editAidMapsUrl" value="' + esc(editingAid.mapsUrl || '') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-medium outline-none focus:bg-white" /></div>' +
             '<div><label class="text-[11px] font-bold text-slate-500 uppercase block mb-1">Emanet Türü (İhtiyaç Kalemleri)</label><div class="grid grid-cols-2 gap-1.5 text-[11px] font-bold">' +
-              EMANET_CATEGORIES.map(function(catObj) {
+              getAllEmanetCategories().map(function(catObj) {
                 var hasCat = normEditingCats.includes(catObj.value);
                 return '<label class="flex items-center space-x-1.5 bg-slate-50 hover:bg-emerald-50/50 p-2 rounded-xl border border-slate-200 cursor-pointer select-none"><input type="checkbox" name="editCats" value="' + esc(catObj.value) + '" ' + (hasCat ? 'checked' : '') + ' class="accent-emerald-600 w-3.5 h-3.5 rounded shrink-0" /><span class="truncate">' + esc(catObj.label) + '</span></label>';
               }).join('') +
@@ -2869,7 +3519,7 @@
       }
 
       // MODAL 3: KASA HAREKETİ DÜZENLEME PENCERESİ
-      if (isAdmin && editingBudget) {
+      if (canManageKasaPerm && editingBudget) {
         html += '<div onclick="if(event.target===this)closeEditBudget()" class="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-end justify-center">' +
           '<form onsubmit="handleSaveEditBudget(event)" class="bg-white w-full max-w-md rounded-t-3xl p-5 overflow-y-auto modal-scroll-body modal-sheet-safe space-y-3.5 shadow-2xl">' +
             '<div class="flex justify-between items-center pb-2 border-b"><h3 class="font-extrabold text-slate-900 text-base font-display">Kasa Hareketini Düzenle</h3><button type="button" onclick="closeEditBudget()" class="px-3 py-1 bg-slate-100 hover:bg-slate-200 rounded-xl font-extrabold text-slate-600 text-xs">← Geri</button></div>' +
@@ -2892,7 +3542,7 @@
       }
 
       // MODAL 4: HAYIRSEVER DÜZENLEME PENCERESİ
-      if (isAdmin && editingDonor) {
+      if (canManageDonorsPerm && editingDonor) {
         html += '<div onclick="if(event.target===this)closeEditDonor()" class="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-end justify-center">' +
           '<form onsubmit="handleSaveEditDonor(event)" class="bg-white w-full max-w-md rounded-t-3xl p-5 overflow-y-auto modal-scroll-body modal-sheet-safe space-y-3.5 shadow-2xl">' +
             '<div class="flex justify-between items-center pb-2 border-b"><h3 class="font-extrabold text-slate-900 text-base font-display">Hayırsever Bilgisini Düzenle</h3><button type="button" onclick="closeEditDonor()" class="px-3 py-1 bg-slate-100 hover:bg-slate-200 rounded-xl font-extrabold text-slate-600 text-xs">← Geri</button></div>' +
@@ -2905,20 +3555,60 @@
         '</div>';
       }
 
-      // MODAL 5: GÖNÜLLÜ DÜZENLEME & YÖNETİCİ YAPMA
+      // MODAL 5: GÖNÜLLÜ YETKİ, ROL & BİLGİ DÜZENLEME PENCERESİ (Detaylı Yetki Anahtarlarıyla)
       if (isAdmin && editingMember) {
+        var editEffRole = getMemberEffectiveRole(editingMember);
+        var editDraftPerms = state.editMemberPermsDraft || getMemberEffectivePermissions(editingMember);
+        var editPermCheckboxesHTML = PERMISSION_DEFINITIONS.map(function(p) {
+          var isChecked = Boolean(editDraftPerms[p.key]);
+          return '<label class="flex items-start space-x-2 bg-slate-50 hover:bg-emerald-50/50 p-2.5 rounded-xl border border-slate-200 cursor-pointer select-none">' +
+            '<input type="checkbox" name="editMemberPermCheck" value="' + esc(p.key) + '" ' + (isChecked ? 'checked' : '') + ' class="accent-emerald-600 w-4 h-4 mt-0.5 rounded shrink-0" />' +
+            '<div class="min-w-0"><span class="text-xs font-extrabold text-slate-800 block leading-tight">' + esc(p.label) + '</span><span class="text-[10px] text-slate-500 block leading-tight mt-0.5">' + esc(p.desc) + '</span></div>' +
+          '</label>';
+        }).join('');
+
         html += '<div onclick="if(event.target===this)closeEditMember()" class="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-end justify-center">' +
           '<form onsubmit="handleSaveEditMember(event)" class="bg-white w-full max-w-md rounded-t-3xl p-5 overflow-y-auto modal-scroll-body modal-sheet-safe space-y-3.5 shadow-2xl">' +
-            '<div class="flex justify-between items-center pb-2 border-b"><h3 class="font-extrabold text-slate-900 text-base font-display">Gönüllü Yetki & Bilgi Düzenle</h3><button type="button" onclick="closeEditMember()" class="px-3 py-1 bg-slate-100 hover:bg-slate-200 rounded-xl font-extrabold text-slate-600 text-xs">← Geri</button></div>' +
+            '<div class="flex justify-between items-center pb-2 border-b"><h3 class="font-extrabold text-slate-900 text-base font-display">🛡️ Gönüllü Yetki & Bilgi Düzenle</h3><button type="button" onclick="closeEditMember()" class="px-3 py-1 bg-slate-100 hover:bg-slate-200 rounded-xl font-extrabold text-slate-600 text-xs">← Geri</button></div>' +
             '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Adı Soyadı</label><input id="editMemberName" required value="' + esc(editingMember.name) + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:bg-white" /></div>' +
-            '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Telefon Numarası</label><input id="editMemberPhone" type="tel" value="' + esc(editingMember.phone || '') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
-            '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Meslek / Uzmanlık Alanı</label><input id="editMemberProfession" value="' + esc(editingMember.profession || '') + '" placeholder="Örn: Doktor, Şoför, Elektrikçi..." class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
             '<div class="grid grid-cols-2 gap-2">' +
-              '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Sistem Rolü (Yetki)</label><select id="editMemberRole" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold"><option value="member" ' + (editingMember.role === 'member' ? 'selected' : '') + '>Gönüllü Kardeşimiz</option><option value="admin" ' + (editingMember.role === 'admin' ? 'selected' : '') + '>Emanetçi (Yönetici)</option></select></div>' +
-              '<div><label class="text-[11px] font-bold text-slate-500 uppercase">4 Haneli PIN</label><input id="editMemberPin" maxlength="4" placeholder="Değişmeyecekse boş" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:bg-white" /></div>' +
+              '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Telefon Numarası</label><input id="editMemberPhone" type="tel" value="' + esc(editingMember.phone || '') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
+              '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Meslek / Görev</label><input id="editMemberProfession" value="' + esc(editingMember.profession || '') + '" placeholder="Örn: Doktor, Şoför..." class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
             '</div>' +
-            '<button type="submit" class="w-full bg-emerald-800 hover:bg-emerald-900 text-white font-extrabold text-xs py-3 rounded-xl font-display shadow-md active:scale-95 transition-all">Yetki ve Bilgileri Kaydet</button>' +
+            '<div class="grid grid-cols-2 gap-2">' +
+              '<div><label class="text-[11px] font-bold text-emerald-800 uppercase">Sistem Rolü (Yetki Seviyesi)</label>' +
+                '<select id="editMemberRole" onchange="onEditMemberRoleChange(this.value)" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:ring-2 focus:ring-emerald-600">' +
+                  '<option value="member" ' + (editEffRole === 'member' ? 'selected' : '') + '>🤝 Saha Gönüllüsü</option>' +
+                  '<option value="treasurer" ' + (editEffRole === 'treasurer' ? 'selected' : '') + '>💼 Kasa & Emanet Sorumlusu</option>' +
+                  '<option value="co_admin" ' + (editEffRole === 'co_admin' ? 'selected' : '') + '>🛡️ Yardımcı Yönetici</option>' +
+                  '<option value="admin" ' + (editEffRole === 'admin' ? 'selected' : '') + '>👑 Baş Emanetçi (Tam Yönetici)</option>' +
+                '</select>' +
+              '</div>' +
+              '<div><label class="text-[11px] font-bold text-slate-500 uppercase">4 Haneli PIN Kodu</label><input id="editMemberPin" maxlength="4" placeholder="Değişmeyecekse boş" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:bg-white" /></div>' +
+            '</div>' +
+            '<div>' +
+              '<label class="text-[11px] font-bold text-slate-500 uppercase block mb-1.5">🛡️ Özel Modül Yetkileri (E-Tablo İle Eşitlenir)</label>' +
+              '<div class="grid grid-cols-1 gap-1.5">' + editPermCheckboxesHTML + '</div>' +
+            '</div>' +
+            '<button type="submit" class="w-full bg-emerald-800 hover:bg-emerald-900 text-white font-extrabold text-xs py-3.5 rounded-xl font-display shadow-md active:scale-95 transition-all">Yetki ve Bilgileri E-Tabloya Kaydet</button>' +
           '</form>' +
+        '</div>';
+      }
+
+      // MODAL 8: GOOGLE APPS SCRIPT KURULUM KODU GÖRÜNTÜLEME & KOPYALAMA MODALI
+      if (isAdmin && state.viewingAppsScriptModal) {
+        html += '<div onclick="if(event.target===this)closeAppsScriptModal()" class="fixed inset-0 z-[135] bg-slate-900/80 backdrop-blur-sm flex items-end justify-center">' +
+          '<div class="bg-white w-full max-w-md rounded-t-3xl p-5 overflow-y-auto modal-scroll-body modal-sheet-safe space-y-3.5 shadow-2xl">' +
+            '<div class="flex justify-between items-center pb-2 border-b">' +
+              '<div><h3 class="font-extrabold text-slate-900 text-sm font-display">📋 Google E-Tablo Apps Script Kodu (v3.2)</h3><p class="text-[10px] text-slate-400">E-Tablo > Uzantılar > Apps Script içine yapıştıracağınız tam kod.</p></div>' +
+              '<button type="button" onclick="closeAppsScriptModal()" class="px-3 py-1 bg-slate-100 hover:bg-slate-200 rounded-xl font-extrabold text-slate-600 text-xs">✕ Kapat</button>' +
+            '</div>' +
+            '<div class="bg-emerald-50 border border-emerald-200 p-3 rounded-2xl text-[11px] text-emerald-900 space-y-1">' +
+              '<p class="font-bold">💡 Bilgi:</p>' +
+              '<p>Mevcut E-Tablo bağlantınız şu anki haliyle bile tüm Yönetici Paneli ayarlarını, yetkileri ve log silme işlemlerini otomatik senkronize eder. Dilerseniz E-Tablonuzda ayrı bir <strong>"Ayarlar"</strong> sekmesi oluşması için aşağıdaki güncel kodu da Apps Script içine yapıştırabilirsiniz.</p>' +
+            '</div>' +
+            '<button type="button" onclick="copyAppsScriptCode()" class="w-full bg-emerald-800 hover:bg-emerald-900 text-white font-extrabold text-xs py-3 rounded-xl shadow flex items-center justify-center space-x-1.5 active:scale-95 transition-all"><span>📋 Apps Script Kodunu Panoya Kopyala</span></button>' +
+          '</div>' +
         '</div>';
       }
 
@@ -3189,7 +3879,8 @@
     };
 
     window.deleteTransfer = function(id) {
-      if (!checkIsAdmin(state.currentUser)) { showToast('Yalnızca yöneticiler silebilir.'); return; }
+      if (!hasPermission('canManageKasa')) { showToast('Yalnızca yetkililer silebilir.'); return; }
+      if (isWriteBlockedByMaintenance()) return;
       var targetId = String(id || '').trim();
       showConfirm('Bu devir kaydını silmek istediğinize emin misiniz?', function() {
         markIdAsDeleted(targetId);
@@ -3204,6 +3895,24 @@
       if (state.adminSubTab !== sub) pushNavState('adminSub:' + sub);
       state.adminSubTab = sub;
       saveNavState();
+      render();
+    };
+
+    window.openAdminControlPanel = function(sectionKey) {
+      if (!checkIsAdmin(state.currentUser)) {
+        showToast('Yönetici paneline yalnızca yöneticiler erişebilir.');
+        return;
+      }
+      pushNavState('adminPanel');
+      state.activeTab = 'ekip';
+      state.adminSubTab = 'panel';
+      if (sectionKey) state.adminPanelSection = sectionKey;
+      saveNavState();
+      render();
+    };
+
+    window.setAdminPanelSection = function(sec) {
+      state.adminPanelSection = sec || 'tumu';
       render();
     };
 
@@ -3222,16 +3931,60 @@
       if (input) { input.value = tag; input.focus(); }
     };
 
-    // GÖNÜLLÜ DÜZENLEME & YÖNETİCİ YAPMA
+    // =========================================================================
+    // 🛡️ GÖNÜLLÜ YETKİ, ROL VE İZİN YÖNETİMİ FONKSİYONLARI
+    // =========================================================================
+    window.onNewMemberRoleChange = function(roleVal) {
+      state.newMemberPermsDraft = getRoleDefaultPermissions(roleVal);
+      var checks = document.querySelectorAll('input[name="newMemberPermCheck"]');
+      checks.forEach(function(ch) {
+        ch.checked = Boolean(state.newMemberPermsDraft[ch.value]);
+      });
+    };
+
+    window.onEditMemberRoleChange = function(roleVal) {
+      state.editMemberPermsDraft = getRoleDefaultPermissions(roleVal);
+      var checks = document.querySelectorAll('input[name="editMemberPermCheck"]');
+      checks.forEach(function(ch) {
+        ch.checked = Boolean(state.editMemberPermsDraft[ch.value]);
+      });
+    };
+
+    window.quickToggleMemberAdmin = function(id) {
+      if (!checkIsAdmin(state.currentUser)) { showToast('Yetki değiştirmeyi yalnızca yöneticiler yapabilir.'); return; }
+      var targetId = String(id || '').trim();
+      var m = state.members.find(function(x) { return String(x.id).trim() === targetId; });
+      if (!m) return;
+      var curRole = getMemberEffectiveRole(m);
+      var nextRole = curRole === 'admin' ? 'member' : 'admin';
+      var nextTitle = nextRole === 'admin' ? 'Baş Emanetçi (Tam Yönetici)' : 'Saha Gönüllüsü';
+
+      showConfirm('"' + m.name + '" kardeşimizin yetkisini "' + nextTitle + '" olarak değiştirmek istediğinize emin misiniz?', function() {
+        m.role = nextRole;
+        m.permissions = getRoleDefaultPermissions(nextRole);
+        if (!state.settings.memberRolesMap) state.settings.memberRolesMap = {};
+        if (!state.settings.memberPermsMap) state.settings.memberPermsMap = {};
+        state.settings.memberRolesMap[targetId] = nextRole;
+        state.settings.memberPermsMap[targetId] = m.permissions;
+        pushToGoogleSheet('Ekip Yetkisi Değiştirildi', m.name + ' yetkisi "' + nextTitle + '" olarak güncellendi.');
+        render();
+        showToast('✅ ' + m.name + ' yetkisi "' + nextTitle + '" olarak güncellendi!');
+      });
+    };
+
     window.openEditMember = function(id) {
       if (!checkIsAdmin(state.currentUser)) { showToast('Yetki düzenlemeyi yalnızca yöneticiler yapabilir.'); return; }
-      state.editingMemberId = String(id || '').trim();
+      var targetId = String(id || '').trim();
+      var m = state.members.find(function(x) { return String(x.id).trim() === targetId; });
+      state.editingMemberId = targetId;
+      state.editMemberPermsDraft = m ? getMemberEffectivePermissions(m) : getRoleDefaultPermissions('member');
       pushNavState('editMember');
       render();
     };
 
     window.closeEditMember = function() {
       state.editingMemberId = null;
+      state.editMemberPermsDraft = null;
       render();
     };
 
@@ -3244,23 +3997,39 @@
         m.name = document.getElementById('editMemberName').value.trim();
         m.phone = document.getElementById('editMemberPhone').value.trim();
         m.profession = document.getElementById('editMemberProfession').value.trim() || 'Gönüllü Kardeşimiz';
-        m.role = document.getElementById('editMemberRole').value;
+        var selectedRole = document.getElementById('editMemberRole').value;
+        m.role = selectedRole;
+
+        var customPerms = {};
+        document.querySelectorAll('input[name="editMemberPermCheck"]').forEach(function(ch) {
+          customPerms[ch.value] = Boolean(ch.checked);
+        });
+        m.permissions = customPerms;
+
+        if (!state.settings.memberRolesMap) state.settings.memberRolesMap = {};
+        if (!state.settings.memberPermsMap) state.settings.memberPermsMap = {};
+        state.settings.memberRolesMap[targetId] = selectedRole;
+        state.settings.memberPermsMap[targetId] = customPerms;
+
         var pinEl = document.getElementById('editMemberPin');
         if (pinEl && pinEl.value.trim()) {
           m.pin = pinEl.value.trim();
         }
-        pushToGoogleSheet('Gönüllü Güncellendi', m.name + ' yetkisi (' + (m.role === 'admin' ? 'Yönetici' : 'Gönüllü') + ') olarak güncellendi.');
+        var roleMeta = getRoleMeta(m);
+        pushToGoogleSheet('Gönüllü Yetkisi Güncellendi', m.name + ' yetkisi (' + roleMeta.title + ') ve özel izinleri güncellendi.');
         state.editingMemberId = null;
+        state.editMemberPermsDraft = null;
         render();
-        showToast('Gönüllü bilgileri ve yetkisi başarıyla güncellendi!');
+        showToast('✅ ' + m.name + ' bilgileri ve yetkileri E-Tabloya kaydedildi!');
       } else {
         showToast('Gönüllü kaydı bulunamadı.');
       }
     };
 
-    // HANE, KASA, BAĞIŞÇI DÜZENLEME & SİLME
+    // HANE, KASA, BAĞIŞÇI DÜZENLEME & SİLME (Yetki Motoruna Bağlı)
     window.openEditAid = function(id) {
-      if (!checkIsAdmin(state.currentUser)) { showToast('Yalnızca yöneticiler düzenleyebilir.'); return; }
+      if (!hasPermission('canEditAids')) { showToast('Hane düzenleme yetkiniz bulunmuyor.'); return; }
+      if (isWriteBlockedByMaintenance()) return;
       var targetId = String(id || '').trim();
       var item = state.aids.find(function(a) { return String(a.id).trim() === targetId; });
       state.previousSelectedAidId = state.selectedAidId || targetId;
@@ -3283,7 +4052,8 @@
 
     window.handleEditPhotoSelect = function(e) {
       if (!Array.isArray(state.editPhotos)) state.editPhotos = [];
-      var files = Array.from(e.target.files || []).slice(0, 3 - state.editPhotos.length);
+      var maxP = Math.max(1, Number((state.settings && state.settings.maxPhotosPerAid) || 3));
+      var files = Array.from(e.target.files || []).slice(0, maxP - state.editPhotos.length);
       if (files.length === 0) return;
       showToast('📸 Fotoğraf HD kalitede işleniyor...');
       files.forEach(function(file) {
@@ -3309,7 +4079,8 @@
 
     window.handleSaveEditAid = function(e) {
       e.preventDefault();
-      if (!checkIsAdmin(state.currentUser)) return;
+      if (!hasPermission('canEditAids')) return;
+      if (isWriteBlockedByMaintenance()) return;
       var targetId = String(state.editingAidId || '').trim();
       var item = state.aids.find(function(a) { return String(a.id).trim() === targetId; });
       if (item) {
@@ -3345,7 +4116,8 @@
     };
 
     window.deleteAid = function(id) {
-      if (!checkIsAdmin(state.currentUser)) { showToast('Kayıt silme yetkisi yalnızca yöneticilerdedir.'); return; }
+      if (!hasPermission('canEditAids')) { showToast('Kayıt silme yetkiniz bulunmuyor.'); return; }
+      if (isWriteBlockedByMaintenance()) return;
       var targetId = String(id || '').trim();
       var item = state.aids.find(function(a) { return String(a.id).trim() === targetId; });
       if (item) { showConfirm('"' + item.name + '" hane kaydını tamamen silmek istediğinize emin misiniz?', function() {
@@ -3360,7 +4132,7 @@
       }
     };
 
-        window.updateEditBudgetLabels = function(val) {
+    window.updateEditBudgetLabels = function(val) {
       var isGelir = val === 'gelir';
       var gl = document.getElementById('editBudgetGiverLabel');
       var rl = document.getElementById('editBudgetReceiverLabel');
@@ -3379,7 +4151,8 @@
     };
 
     window.openEditBudget = function(id) {
-      if (!checkIsAdmin(state.currentUser)) { showToast('Kasa hareketlerini yalnızca yöneticiler düzenleyebilir.'); return; }
+      if (!hasPermission('canManageKasa')) { showToast('Kasa hareketlerini düzenleme yetkiniz bulunmuyor.'); return; }
+      if (isWriteBlockedByMaintenance()) return;
       state.editingBudgetId = String(id || '').trim();
       pushNavState('editBudget');
       render();
@@ -3392,7 +4165,8 @@
 
     window.handleSaveEditBudget = function(e) {
       e.preventDefault();
-      if (!checkIsAdmin(state.currentUser)) return;
+      if (!hasPermission('canManageKasa')) return;
+      if (isWriteBlockedByMaintenance()) return;
       var targetId = String(state.editingBudgetId || '').trim();
       var item = state.budget.find(function(b) { return String(b.id).trim() === targetId; });
       if (item) {
@@ -3414,7 +4188,8 @@
     };
 
     window.deleteBudgetItem = function(id) {
-      if (!checkIsAdmin(state.currentUser)) { showToast('Kasa hareketlerini yalnızca yöneticiler silebilir.'); return; }
+      if (!hasPermission('canManageKasa')) { showToast('Kasa hareketlerini silme yetkiniz bulunmuyor.'); return; }
+      if (isWriteBlockedByMaintenance()) return;
       var targetId = String(id || '').trim();
       var item = state.budget.find(function(b) { return String(b.id).trim() === targetId; });
       if (item) { showConfirm('Bu kasa hareketini silmek istediğinize emin misiniz?', function() {
@@ -3429,7 +4204,8 @@
     };
 
     window.openEditDonor = function(id) {
-      if (!checkIsAdmin(state.currentUser)) { showToast('Bağışçı bilgilerini yalnızca yöneticiler düzenleyebilir.'); return; }
+      if (!hasPermission('canManageDonors')) { showToast('Bağışçı bilgilerini düzenleme yetkiniz bulunmuyor.'); return; }
+      if (isWriteBlockedByMaintenance()) return;
       state.editingDonorId = String(id || '').trim();
       pushNavState('editDonor');
       render();
@@ -3442,7 +4218,8 @@
 
     window.handleSaveEditDonor = function(e) {
       e.preventDefault();
-      if (!checkIsAdmin(state.currentUser)) return;
+      if (!hasPermission('canManageDonors')) return;
+      if (isWriteBlockedByMaintenance()) return;
       var targetId = String(state.editingDonorId || '').trim();
       var item = state.donors.find(function(d) { return String(d.id).trim() === targetId; });
       if (item) {
@@ -3459,7 +4236,8 @@
     };
 
     window.deleteDonor = function(id) {
-      if (!checkIsAdmin(state.currentUser)) { showToast('Bağışçı silme yetkisi yalnızca yöneticilerdedir.'); return; }
+      if (!hasPermission('canManageDonors')) { showToast('Bağışçı silme yetkiniz bulunmuyor.'); return; }
+      if (isWriteBlockedByMaintenance()) return;
       var targetId = String(id || '').trim();
       var item = state.donors.find(function(d) { return String(d.id).trim() === targetId; });
       if (item) { showConfirm('Bu hayırsever kaydını silmek istediğinize emin misiniz?', function() {
@@ -3585,7 +4363,8 @@
     };
 
     window.removeDeliveryPhoto = function(aidId, photoIdx) {
-      if (!checkIsAdmin(state.currentUser)) { showToast('Fotoğraf silme yetkisi yalnızca yöneticidedir.'); return; }
+      if (!hasPermission('canEditAids')) { showToast('Fotoğraf silme yetkiniz bulunmuyor.'); return; }
+      if (isWriteBlockedByMaintenance()) return;
       var targetId = String(aidId || '').trim();
       var item = state.aids.find(function(a) { return String(a.id).trim() === targetId; });
       if (!item || !Array.isArray(item.deliveryPhotos)) return;
@@ -3599,13 +4378,14 @@
     };
 
     // =========================================================================
-    // 💬 HAYIRSEVER TEŞEKKÜR VE MAKBUZ WHATSAPP MESAJI MOTORU
+    // 💬 HAYIRSEVER TEŞEKKÜR VE MAKBUZ WHATSAPP MESAJI MOTORU (Yönetici Şablonlu)
     // =========================================================================
     window.sendDonorReceiptWhatsApp = function(budgetId) {
       var targetId = String(budgetId || '').trim();
       var item = (state.budget || []).find(function(b) { return String(b.id).trim() === targetId; });
       if (!item) { showToast('Kasa hareketi bulunamadı.'); return; }
 
+      var st = state.settings || DEFAULT_SETTINGS;
       var giverName = item.giver || 'Hayırsever Kardeşimiz';
       var amt = Number(item.amount) || 0;
       var cat = item.category || item.desc || 'Zekât / Teberru';
@@ -3620,12 +4400,12 @@
 
       var donorPhone = (donorObj && donorObj.phone) ? cleanPhone(donorObj.phone) : '';
 
-      var text = '🌿 *HÂRE İNSANİ YARDIM HALKASI*\n' +
+      var text = (st.receiptHeader || '🌿 *HÂRE İNSANİ YARDIM HALKASI*') + '\n' +
         '_“Mallarını Allah yolunda infak edenlerin örneği, yedi başak bitiren ve her başağında yüz dane bulunan bir tek tohumun hâli gibidir...” (Bakara, 261)_\n\n' +
         'Muhterem *' + giverName + '*,\n\n' +
-        '🤲 *' + amt.toLocaleString('tr-TR') + ' ₺* tutarındaki *' + cat + '* emanetiniz sorumlumuz *' + authorName + '* tarafından teslim alınmış ve emanet sandığına kaydedilmiştir.\n\n' +
-        'Emanetiniz ihtiyaç sahibi yetim ve mazlum ailelerimize ulaştırılacaktır. Rabbimiz hayrınızı ve niyetinizi dergâh-ı izzetinde makbul eylesin, kazancınıza bereket, hanenize afiyet ihsan eylesin.\n\n' +
-        '_Hâre İnsani Yardım ve Emanet Koordinasyonu_';
+        '🤲 *' + amt.toLocaleString('tr-TR') + ' ' + (st.currencySymbol || '₺') + '* tutarındaki *' + cat + '* emanetiniz sorumlumuz *' + authorName + '* tarafından teslim alınmış ve emanet sandığına kaydedilmiştir.\n\n' +
+        (st.receiptFooter || 'Emanetiniz ihtiyaç sahibi yetim ve mazlum ailelerimize ulaştırılacaktır. Rabbimiz hayrınızı ve niyetinizi dergâh-ı izzetinde makbul eylesin, kazancınıza bereket, hanenize afiyet ihsan eylesin.') + '\n\n' +
+        (st.shareCardFooter || '_Hâre İnsani Yardım ve Emanet Koordinasyonu_');
 
       if (donorPhone) {
         openWhatsAppChat(donorPhone, text);
@@ -3661,13 +4441,15 @@
       var cleanP = cleanPhone(phoneVal);
       var cleanN = nameVal.toLowerCase();
 
-      // 🛡️ MÜKERRER (ÇİFT) KAYIT KONTROLÜ
+      if (isWriteBlockedByMaintenance()) return;
+      // 🛡️ MÜKERRER (ÇİFT) KAYIT KONTROLÜ (Yönetici Panelinden Açılıp Kapatılabilir)
       var duplicateMatch = null;
+      var dupEnabled = !state.settings || state.settings.duplicateCheckEnabled !== false;
       var dialP = formatPhoneForDialer(phoneVal);
-      if (dialP && dialP.length >= 7) {
+      if (dupEnabled && dialP && dialP.length >= 7) {
         duplicateMatch = state.aids.find(function(a) { return formatPhoneForDialer(a.phone) === dialP; });
       }
-      if (!duplicateMatch && cleanN.length >= 3) {
+      if (dupEnabled && !duplicateMatch && cleanN.length >= 3) {
         duplicateMatch = state.aids.find(function(a) { return (a.name || '').trim().toLowerCase() === cleanN; });
       }
 
@@ -3771,19 +4553,361 @@
 
     window.handleNewMember = function(e) {
       e.preventDefault();
-      if (!checkIsAdmin(state.currentUser)) { showToast('Yeni gönüllü ekleme yetkisi yalnızca yöneticilerdedir.'); return; }
+      if (!checkIsAdmin(state.currentUser)) { showToast('Yeni üye ekleme yetkisi yalnızca yöneticilerdedir.'); return; }
+      var newId = Date.now().toString();
+      var roleVal = document.getElementById('newMemberRole').value || 'member';
+      var customPerms = {};
+      document.querySelectorAll('input[name="newMemberPermCheck"]').forEach(function(ch) {
+        customPerms[ch.value] = Boolean(ch.checked);
+      });
+      var defaultPin = (state.settings && state.settings.defaultPin) ? state.settings.defaultPin : '1453';
       var newMember = {
-        id: Date.now().toString(),
-        name: document.getElementById('newMemberName').value,
-        phone: document.getElementById('newMemberPhone').value,
+        id: newId,
+        name: document.getElementById('newMemberName').value.trim(),
+        phone: document.getElementById('newMemberPhone').value.trim(),
         profession: document.getElementById('newMemberProfession').value.trim() || 'Gönüllü Kardeşimiz',
-        role: document.getElementById('newMemberRole').value,
-        pin: document.getElementById('newMemberPin').value || '1453',
+        role: roleVal,
+        permissions: customPerms,
+        pin: document.getElementById('newMemberPin').value.trim() || defaultPin,
         active: true
       };
+      if (!state.settings.memberRolesMap) state.settings.memberRolesMap = {};
+      if (!state.settings.memberPermsMap) state.settings.memberPermsMap = {};
+      state.settings.memberRolesMap[newId] = roleVal;
+      state.settings.memberPermsMap[newId] = customPerms;
+      state.newMemberPermsDraft = null;
+
       state.members.push(newMember);
-      pushToGoogleSheet('Gönüllü Eklendi', newMember.name + ' ekibe eklendi.');
+      var roleMeta = getRoleMeta(newMember);
+      pushToGoogleSheet('Gönüllü Eklendi', newMember.name + ' (' + roleMeta.title + ') ekibe eklendi.');
       render();
+      showToast('✅ ' + newMember.name + ' (' + roleMeta.shortTitle + ') ekibe kaydedildi!');
+    };
+
+    // =========================================================================
+    // 🗑️ SADECE YÖNETİCİ İÇİN LOG (GÜNLÜK) SİLME VE TEMİZLEME MOTORU (E-Tablo Entegre)
+    // =========================================================================
+    window.deleteSingleLog = function(logKey) {
+      if (!checkIsAdmin(state.currentUser)) {
+        showToast('Log kayıtlarını yalnızca yöneticiler silebilir.');
+        return;
+      }
+      if (!logKey) return;
+      var targetLog = (state.logs || []).find(function(l) { return getLogUniqueKey(l) === logKey; });
+      var label = targetLog ? (targetLog.action + ': ' + targetLog.details) : 'Bu günlük kaydını';
+
+      showConfirm('"' + label + '" log kaydını kalıcı olarak silmek istediğinize emin misiniz?', function() {
+        if (!state.settings.deletedLogKeys) state.settings.deletedLogKeys = [];
+        if (!state.settings.deletedLogKeys.includes(logKey)) {
+          state.settings.deletedLogKeys.push(logKey);
+        }
+        if (targetLog && targetLog.id) markIdAsDeleted(targetLog.id);
+        state.logs = (state.logs || []).filter(function(l) { return getLogUniqueKey(l) !== logKey; });
+        pushToGoogleSheet(null, null, { skipLog: true, overwriteLogs: true });
+        render();
+        showToast('🗑️ Log kaydı silindi ve E-Tablo güncellendi.');
+      });
+    };
+
+    window.deleteFilteredLogs = function() {
+      if (!checkIsAdmin(state.currentUser)) { showToast('Log silme yetkisi yalnızca yöneticidedir.'); return; }
+      var q = (state.logSearchQuery || '').toLowerCase().trim();
+      if (!q) return;
+      var toDelete = (state.logs || []).filter(function(l) {
+        return (l.author || '').toLowerCase().includes(q) || (l.action || '').toLowerCase().includes(q) || (l.details || '').toLowerCase().includes(q) || (l.date || '').toLowerCase().includes(q);
+      });
+      if (toDelete.length === 0) { showToast('Silinecek eşleşen log bulunamadı.'); return; }
+
+      showConfirm('Arama kriterine uyan ' + toDelete.length + ' adet log kaydını kalıcı olarak silmek istediğinize emin misiniz?', function() {
+        if (!state.settings.deletedLogKeys) state.settings.deletedLogKeys = [];
+        var delSet = {};
+        toDelete.forEach(function(l) {
+          var k = getLogUniqueKey(l);
+          delSet[k] = true;
+          if (!state.settings.deletedLogKeys.includes(k)) state.settings.deletedLogKeys.push(k);
+          if (l.id) markIdAsDeleted(l.id);
+        });
+        state.logs = (state.logs || []).filter(function(l) { return !delSet[getLogUniqueKey(l)]; });
+        state.logSearchQuery = '';
+        pushToGoogleSheet(null, null, { skipLog: true, overwriteLogs: true });
+        render();
+        showToast('🗑️ ' + toDelete.length + ' adet log kaydı silindi ve E-Tabloya işlendi.');
+      });
+    };
+
+    window.trimOldLogs = function(keepCount) {
+      if (!checkIsAdmin(state.currentUser)) { showToast('Log temizleme yetkisi yalnızca yöneticidedir.'); return; }
+      var keep = Number(keepCount) || 20;
+      if ((state.logs || []).length <= keep) {
+        showToast('ℹ️ Mevcut log sayısı zaten ' + keep + ' veya daha az (' + (state.logs || []).length + ' kayıt).');
+        return;
+      }
+      var removeCount = state.logs.length - keep;
+      showConfirm('En güncel ' + keep + ' log kaydını koruyup daha eski olan ' + removeCount + ' adet log kaydını silmek istediğinize emin misiniz?', function() {
+        if (!state.settings.deletedLogKeys) state.settings.deletedLogKeys = [];
+        var removed = state.logs.slice(keep);
+        removed.forEach(function(l) {
+          var k = getLogUniqueKey(l);
+          if (!state.settings.deletedLogKeys.includes(k)) state.settings.deletedLogKeys.push(k);
+          if (l.id) markIdAsDeleted(l.id);
+        });
+        state.logs = state.logs.slice(0, keep);
+        pushToGoogleSheet(null, null, { skipLog: true, overwriteLogs: true });
+        render();
+        showToast('✅ Eski ' + removeCount + ' log temizlendi, son ' + keep + ' kayıt korundu.');
+      });
+    };
+
+    window.clearAllLogs = function() {
+      if (!checkIsAdmin(state.currentUser)) { showToast('Tüm logları temizleme yetkisi yalnızca yöneticidedir.'); return; }
+      if (!state.logs || state.logs.length === 0) {
+        showToast('ℹ️ Günlük (log) listesi zaten boş.');
+        return;
+      }
+      var count = state.logs.length;
+      showConfirm('⚠️ TÜM GÜNLÜK KAYITLARINI SİL\nToplam ' + count + ' adet işlem günlüğü (log) kaydını tamamen silmek ve E-Tablo Günlük sayfasını sıfırlamak istediğinize emin misiniz?', function() {
+        state.logs = [];
+        state.settings.logsClearedAt = Date.now();
+        state.settings.deletedLogKeys = [];
+        saveCacheItem('hare_cached_logs', []);
+        pushToGoogleSheet(null, null, { skipLog: true, overwriteLogs: true });
+        render();
+        showToast('🧹 Tüm işlem günlüğü (log) kayıtları temizlendi ve E-Tablo sıfırlandı!');
+      });
+    };
+
+    // =========================================================================
+    // 🛠️ YÖNETİCİ KONTROL PANELİ (SİSTEM AYARLARI & E-TABLO MERKEZİ) FONKSİYONLARI
+    // =========================================================================
+    window.saveAnnouncementSettings = function(e) {
+      e.preventDefault();
+      if (!checkIsAdmin(state.currentUser)) return;
+      state.settings.announcementActive = Boolean((document.getElementById('panelAnnActive') || {}).checked);
+      state.settings.announcementType = (document.getElementById('panelAnnType') || {}).value || 'info';
+      state.settings.announcementTitle = ((document.getElementById('panelAnnTitle') || {}).value || '').trim();
+      state.settings.announcementText = ((document.getElementById('panelAnnText') || {}).value || '').trim();
+      if (state.settings.announcementTitle || state.settings.announcementText) {
+        state.settings.announcementActive = true;
+      }
+      pushToGoogleSheet('Duyuru Güncellendi', 'Yönetici saha duyuru panosunu güncelledi: ' + (state.settings.announcementTitle || 'Duyuru'));
+      render();
+      showToast('📢 Saha duyurusu kaydedildi ve tüm telefonlarda yayınlandı!');
+    };
+
+    window.clearAnnouncement = function() {
+      if (!checkIsAdmin(state.currentUser)) return;
+      state.settings.announcementActive = false;
+      state.settings.announcementTitle = '';
+      state.settings.announcementText = '';
+      pushToGoogleSheet('Duyuru Kaldırıldı', 'Saha duyuru panosu kapatıldı.');
+      render();
+      showToast('🔇 Saha duyurusu yayından kaldırıldı.');
+    };
+
+    window.saveGeneralSettings = function(e) {
+      e.preventDefault();
+      if (!checkIsAdmin(state.currentUser)) return;
+      state.settings.appTitle = ((document.getElementById('panelAppTitle') || {}).value || 'Hâre').trim();
+      state.settings.appSubtitle = ((document.getElementById('panelAppSubtitle') || {}).value || 'İnsani Yardım Halkası').trim();
+      state.settings.orgDescription = ((document.getElementById('panelOrgDesc') || {}).value || '').trim();
+      state.settings.orgMotto = ((document.getElementById('panelOrgMotto') || {}).value || '').trim();
+      state.settings.defaultCity = ((document.getElementById('panelDefaultCity') || {}).value || 'Kayseri').trim();
+      state.settings.defaultDistrict = ((document.getElementById('panelDefaultDistrict') || {}).value || '').trim();
+      state.settings.currencySymbol = ((document.getElementById('panelCurrency') || {}).value || '₺').trim();
+      state.settings.orgIban = ((document.getElementById('panelOrgIban') || {}).value || '').trim();
+      state.settings.orgIbanHolder = ((document.getElementById('panelOrgIbanHolder') || {}).value || '').trim();
+      document.title = state.settings.appTitle + ' — ' + state.settings.appSubtitle;
+      pushToGoogleSheet('Kurum Ayarları Güncellendi', 'Yönetici panelinden kurum, bölge ve IBAN ayarları güncellendi.');
+      render();
+      showToast('✅ Kurum kimliği, varsayılan bölge ve IBAN ayarları E-Tabloya kaydedildi!');
+    };
+
+    window.addCustomCategory = function(e) {
+      e.preventDefault();
+      if (!checkIsAdmin(state.currentUser)) return;
+      var emoji = ((document.getElementById('newCatEmojiInput') || {}).value || '📦').trim();
+      var name = ((document.getElementById('newCatNameInput') || {}).value || '').trim();
+      if (!name) return;
+      if (!Array.isArray(state.settings.customCategories)) state.settings.customCategories = [];
+      if (!Array.isArray(state.settings.disabledDefaultCategories)) state.settings.disabledDefaultCategories = [];
+      // Eğer varsayılan kategorilerden silinmişse geri aç
+      state.settings.disabledDefaultCategories = state.settings.disabledDefaultCategories.filter(function(x) { return x !== name; });
+      if (!state.settings.customCategories.some(function(c) { return c.value.toLowerCase() === name.toLowerCase(); }) &&
+          !EMANET_CATEGORIES.some(function(c) { return c.value.toLowerCase() === name.toLowerCase(); })) {
+        state.settings.customCategories.push({ value: name, label: (emoji ? emoji + ' ' : '📦 ') + name });
+      }
+      pushToGoogleSheet('Kategori Eklendi', '"' + name + '" ihtiyaç kalemi kategorilere eklendi.');
+      render();
+      showToast('✅ "' + name + '" kategorisi eklendi ve E-Tabloya kaydedildi!');
+    };
+
+    window.removeCategoryItem = function(catVal) {
+      if (!checkIsAdmin(state.currentUser)) return;
+      if (!catVal) return;
+      showConfirm('"' + catVal + '" kategorisini listeden kaldırmak istediğinize emin misiniz?', function() {
+        if (!Array.isArray(state.settings.customCategories)) state.settings.customCategories = [];
+        if (!Array.isArray(state.settings.disabledDefaultCategories)) state.settings.disabledDefaultCategories = [];
+        state.settings.customCategories = state.settings.customCategories.filter(function(c) { return c.value !== catVal; });
+        if (EMANET_CATEGORIES.some(function(c) { return c.value === catVal; })) {
+          if (!state.settings.disabledDefaultCategories.includes(catVal)) {
+            state.settings.disabledDefaultCategories.push(catVal);
+          }
+        }
+        pushToGoogleSheet('Kategori Kaldırıldı', '"' + catVal + '" kategorisi listeden kaldırıldı.');
+        render();
+        showToast('🗑️ "' + catVal + '" kategorisi kaldırıldı.');
+      });
+    };
+
+    window.resetCategoriesToDefault = function() {
+      if (!checkIsAdmin(state.currentUser)) return;
+      showConfirm('İhtiyaç kalemlerini varsayılan 10 kategoriye sıfırlamak istediğinize emin misiniz?', function() {
+        state.settings.customCategories = [];
+        state.settings.disabledDefaultCategories = [];
+        pushToGoogleSheet('Kategoriler Sıfırlandı', 'Emanet kategorileri varsayılan listeye döndürüldü.');
+        render();
+        showToast('🔄 Varsayılan 10 kategori geri yüklendi.');
+      });
+    };
+
+    window.togglePolicySetting = function(key) {
+      if (!checkIsAdmin(state.currentUser)) return;
+      state.settings[key] = !Boolean(state.settings[key]);
+      if (key === 'forcePrivacyOnStart' && state.settings.forcePrivacyOnStart) {
+        state.privacyMode = true;
+      }
+      pushToGoogleSheet('Sistem Politikası Değiştirildi', key + ' ayarı ' + (state.settings[key] ? 'AÇIK' : 'KAPALI') + ' yapıldı.');
+      render();
+      showToast('✅ Sistem politikası güncellendi ve E-Tabloya işlendi.');
+    };
+
+    window.saveSecuritySettings = function(e) {
+      e.preventDefault();
+      if (!checkIsAdmin(state.currentUser)) return;
+      var defPin = ((document.getElementById('panelDefaultPin') || {}).value || '1453').trim();
+      var syncSec = Number((document.getElementById('panelSyncInterval') || {}).value || 30);
+      if (defPin.length !== 4 || !/^\d{4}$/.test(defPin)) {
+        showToast('❌ Varsayılan PIN kodu 4 haneli rakam olmalıdır.');
+        return;
+      }
+      state.settings.defaultPin = defPin;
+      state.settings.autoSyncIntervalSec = syncSec;
+      pushToGoogleSheet('Güvenlik Ayarları Güncellendi', 'Varsayılan PIN ve eşitleme süresi (' + syncSec + ' sn) güncellendi.');
+      render();
+      showToast('✅ Güvenlik ve eşitleme ayarları kaydedildi!');
+    };
+
+    window.saveMediaAndTemplateSettings = function(e) {
+      e.preventDefault();
+      if (!checkIsAdmin(state.currentUser)) return;
+      state.settings.photoQualityPreset = (document.getElementById('panelPhotoPreset') || {}).value || 'hd';
+      state.settings.maxPhotosPerAid = Number((document.getElementById('panelMaxPhotos') || {}).value || 3);
+      state.settings.autoStatusOnDeliveryPhoto = Boolean((document.getElementById('panelAutoDeliveryStatus') || {}).checked);
+      state.settings.receiptHeader = ((document.getElementById('panelReceiptHeader') || {}).value || '').trim();
+      state.settings.receiptFooter = ((document.getElementById('panelReceiptFooter') || {}).value || '').trim();
+      state.settings.shareCardFooter = ((document.getElementById('panelShareFooter') || {}).value || '').trim();
+      pushToGoogleSheet('Medya ve Şablon Ayarları', 'Kamera kalitesi ve WhatsApp mesaj şablonları güncellendi.');
+      render();
+      showToast('✅ Kamera kalitesi ve WhatsApp şablonları E-Tabloya kaydedildi!');
+    };
+
+    window.testSheetConnection = async function() {
+      if (!checkIsAdmin(state.currentUser)) return;
+      showToast('⚡ Google E-Tablo bağlantısı test ediliyor...');
+      var t0 = Date.now();
+      try {
+        var res = await fetch(state.sheetUrl + '?token=' + encodeURIComponent(API_SECRET) + '&_ts=' + t0);
+        var data = await res.json();
+        var elapsed = Date.now() - t0;
+        if (data && !data.error) {
+          showToast('✅ Bağlantı Başarılı! (' + elapsed + ' ms) • ' + ((data.aids || []).length) + ' Hane, ' + ((data.budget || []).length) + ' Kasa kaydı okundu.');
+        } else {
+          showToast('⚠️ Sunucu yanıt verdi ancak hata döndü: ' + (data.error || 'Bilinmeyen hata'));
+        }
+      } catch(err) {
+        showToast('❌ Bağlantı kurulamadı: Lütfen E-Tablo Web App linkinizi ve internetinizi kontrol edin.');
+      }
+    };
+
+    window.openAppsScriptModal = function() {
+      state.viewingAppsScriptModal = true;
+      pushNavState('appsScriptModal');
+      render();
+    };
+
+    window.closeAppsScriptModal = function() {
+      state.viewingAppsScriptModal = false;
+      render();
+    };
+
+    window.copyAppsScriptCode = function() {
+      var codeText = '// Hâre Google Apps Script v3.2 (Yönetici Paneli, Yetki, Log Silme & Ayarlar Tam Uyumlu)\n' +
+        'var API_SECRET = "' + API_SECRET + '";\n' +
+        '// Tam kurulum dosyası proje klasörünüzdeki ai_studio_code.js içinde hazırdır.';
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(codeText).then(function() {
+          showToast('📋 Bilgi panoya kopyalandı! Tam kod ai_studio_code.js dosyanızda güncellenmiştir.');
+        });
+      } else {
+        showToast('📋 Tam kod ai_studio_code.js dosyanızda güncellenmiştir.');
+      }
+    };
+
+    window.copyOrgIban = function() {
+      var st = state.settings || DEFAULT_SETTINGS;
+      if (!st.orgIban) return;
+      var text = (st.orgIbanHolder ? st.orgIbanHolder + '\n' : '') + st.orgIban;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function() {
+          showToast('📋 Resmi IBAN ve Alıcı bilgisi panoya kopyalandı!');
+        });
+      } else {
+        showToast('📋 IBAN: ' + st.orgIban);
+      }
+    };
+
+    window.shareOrgIbanWhatsApp = function() {
+      var st = state.settings || DEFAULT_SETTINGS;
+      if (!st.orgIban) return;
+      var text = '🌿 *' + (st.appTitle || 'HÂRE') + ' — RESMİ EMANET & BAĞIŞ HESABI*\n\n' +
+        (st.orgIbanHolder ? '👤 *Alıcı Adı:* ' + st.orgIbanHolder + '\n' : '') +
+        '🏦 *IBAN:* `' + st.orgIban + '`\n\n' +
+        (st.shareCardFooter || '_Hâre İnsani Yardım Halkası_');
+      var appUrl = 'whatsapp://send?text=' + encodeURIComponent(text);
+      markExternalIntentActive();
+      pushNavState('external');
+      var a = document.createElement('a');
+      a.href = appUrl;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function() { if (a && a.parentNode) a.parentNode.removeChild(a); }, 300);
+    };
+
+    window.archiveDeliveredAids = function() {
+      if (!checkIsAdmin(state.currentUser)) return;
+      var delivered = (state.aids || []).filter(function(a) { return a.status === 'Teslim Edildi'; });
+      if (delivered.length === 0) {
+        showToast('ℹ️ Şu an "Teslim Edildi" durumunda hane bulunmuyor.');
+        return;
+      }
+      showConfirm('Durumu "✅ Teslim Edildi" olan ' + delivered.length + ' adet haneyi aktif listeden temizlemek istediğinize emin misiniz? (Öncesinde Excel CSV yedeği almanız önerilir)', function() {
+        delivered.forEach(function(a) { markIdAsDeleted(a.id); });
+        state.aids = (state.aids || []).filter(function(a) { return a.status !== 'Teslim Edildi'; });
+        pushToGoogleSheet('Teslim Edilenler Temizlendi', delivered.length + ' adet ulaştırılmış hane listeden temizlendi.');
+        render();
+        showToast('✅ ' + delivered.length + ' adet teslim edilmiş hane listeden temizlendi.');
+      });
+    };
+
+    window.resetDeletedIdsCache = function() {
+      if (!checkIsAdmin(state.currentUser)) return;
+      showConfirm('Cihazdaki silinen kayıtlar engel listesini (hare_deleted_ids) sıfırlayıp E-Tablodaki tüm satırları yeniden çekmek istediğinize emin misiniz?', function() {
+        try { localStorage.removeItem('hare_deleted_ids'); } catch(e) {}
+        state.settings.deletedLogKeys = [];
+        state.settings.logsClearedAt = 0;
+        syncFromGoogleSheet(false);
+        showToast('🔄 Engel listesi sıfırlandı, E-Tablo verileri yeniden çekiliyor...');
+      });
     };
 
     window.toggleMemberActive = function(id) {
@@ -3969,14 +5093,29 @@
       var addrParts = [item.address, item.neighborhood, item.district, item.city].filter(Boolean);
       var fullText = (coords ? '📍 Koordinat: ' + coords + '\n' : '') + '🏠 Adres: ' + addrParts.join(', ');
 
+      function fallbackCopyText(txt) {
+        try {
+          var ta = document.createElement('textarea');
+          ta.value = txt;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+          showToast('📋 Konum ve adres panoya kopyalandı!');
+        } catch(e) {
+          showToast('📋 Konum: ' + txt);
+        }
+      }
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(fullText).then(function() {
           showToast('📋 Konum ve adres panoya kopyalandı!');
         }).catch(function() {
-          prompt('Konum ve adres:', fullText);
+          fallbackCopyText(fullText);
         });
       } else {
-        prompt('Konum ve adres:', fullText);
+        fallbackCopyText(fullText);
       }
     };
 
@@ -4093,7 +5232,7 @@
     };
 
     window.exportAidsCSV = function() {
-      if (!checkIsAdmin(state.currentUser)) { showToast('Rapor alma yetkisi yalnızca yöneticidedir.'); return; }
+      if (!hasPermission('canExportData')) { showToast('Rapor alma yetkiniz bulunmuyor.'); return; }
       var rows = [
         ['İsim', 'Şehir', 'İlçe', 'Mahalle', 'Telefon', 'Açık Adres', 'Harita Linki', 'İhtiyaç Kalemleri', 'Durum', 'Tespit Notları', 'İlgilenen', 'Son Güncelleme']
       ];
@@ -4134,8 +5273,76 @@
       showToast('📊 Haneler listesi Excel CSV olarak indirildi.');
     };
 
+    window.exportDonorsCSV = function() {
+      if (!hasPermission('canExportData')) { showToast('Rapor alma yetkiniz bulunmuyor.'); return; }
+      var rows = [
+        ['Ad Soyad', 'Telefon', 'Şehir', 'E-posta', 'Toplam Teberru (TL)', 'Banka (TL)', 'Elden (TL)', 'Notlar']
+      ];
+      (state.donors || []).forEach(function(d) {
+        var st = calculateDonorStats(d.name);
+        rows.push([
+          d.name || '',
+          d.phone || '',
+          d.city || '',
+          d.email || '',
+          st.totalTeberru || 0,
+          st.banka || 0,
+          st.elden || 0,
+          d.notes || ''
+        ]);
+      });
+      var csvContent = '\uFEFF' + rows.map(function(r) {
+        return r.map(function(field) {
+          var f = String(field || '').replace(/"/g, '""');
+          return '"' + f + '"';
+        }).join(';');
+      }).join('\r\n');
+      var blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      var url = URL.createObjectURL(blob);
+      var link = document.createElement('a');
+      link.href = url;
+      link.download = 'hare_hayirseverler_' + getTurkeyDate().replace(/\./g, '_') + '.csv';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      showToast('🤝 Hayırseverler listesi Excel CSV olarak indirildi.');
+    };
+
+    window.exportLogsCSV = function() {
+      if (!checkIsAdmin(state.currentUser) && !hasPermission('canViewLogs')) { showToast('Günlük indirme yetkiniz bulunmuyor.'); return; }
+      var rows = [
+        ['ID', 'Tarih Saat', 'İşlemi Yapan', 'İşlem Türü', 'Detaylar']
+      ];
+      (state.logs || []).forEach(function(l) {
+        rows.push([
+          l.id || '',
+          formatTurkeyDateTime(l.date),
+          l.author || '',
+          l.action || '',
+          l.details || ''
+        ]);
+      });
+      var csvContent = '\uFEFF' + rows.map(function(r) {
+        return r.map(function(field) {
+          var f = String(field || '').replace(/"/g, '""');
+          return '"' + f + '"';
+        }).join(';');
+      }).join('\r\n');
+      var blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      var url = URL.createObjectURL(blob);
+      var link = document.createElement('a');
+      link.href = url;
+      link.download = 'hare_islem_gunlugu_' + getTurkeyDate().replace(/\./g, '_') + '.csv';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      showToast('📜 İşlem günlüğü (log) Excel CSV olarak indirildi.');
+    };
+
     window.exportBudgetCSV = function() {
-      if (!checkIsAdmin(state.currentUser)) { showToast('Kasa defteri indirme yetkisi yalnızca yöneticidedir.'); return; }
+      if (!hasPermission('canExportData')) { showToast('Kasa defteri indirme yetkiniz bulunmuyor.'); return; }
       var rows = [
         ['Tür', 'Kategori', 'Ödeme Kanalı', 'Tutar (TL)', 'Açıklama', 'Veren (Ödeyen)', 'Alan (Teslim Alan)', 'Kaydeden', 'Tarih']
       ];
@@ -4358,9 +5565,10 @@
         return;
       }
 
-      // 1. PIN Değiştirme modalı açıksa sadece onu kapat
-      if (state.changingPin) {
+      // 1. PIN Değiştirme veya Apps Script modalı açıksa sadece onu kapat
+      if (state.changingPin || state.viewingAppsScriptModal) {
         state.changingPin = false;
+        state.viewingAppsScriptModal = false;
         render();
         armHomeHash();
         return;
@@ -4676,7 +5884,7 @@
         localStorage.removeItem('hare_user');
       }
 
-      if (localStorage.getItem('hare_privacy') === '1') {
+      if (localStorage.getItem('hare_privacy') === '1' || (state.settings && state.settings.forcePrivacyOnStart)) {
         state.privacyMode = true;
       }
     } catch(e) {}
