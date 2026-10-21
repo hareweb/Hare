@@ -200,21 +200,21 @@ Bu belgede, Hâre İnsani Yardım ve Ekip Koordinasyon Platformu'nda yapılan so
 
   3. **İçerik Kaydırma Boşluğu:** Sayfa altlarındaki son kayıtların menü arkasında kaybolmaması için ana gövde alt boşluğu `pb-36` seviyesinde tutuldu.
 
-### 18. 🗺️ Harita ve Navigasyonda Google Play Store'a Atma Sorununun Kökten Çözümü
+### 18. 🗺️ Harita ve Canlı Navigasyon Sistemi (E-Tablo Entegrasyonu ve Kesintisiz Çift Kademeli Açılış)
 
-* **Karşılaşılan Sorun ve Teknik Analiz:**
-  * Hane detayındaki **"🗺️ Haritada Gör"** veya **"🧭 Canlı Navigasyon"** butonlarına basıldığında, uygulama haritayı açmak yerine Google Play Store'daki Google Haritalar indirme/güncelleme sayfasına fırlatıyordu.
-  * **Teknik Sebebi:** Daha önce kullanılan `intent://maps.google.com/...#Intent;package=com.google.android.apps.maps;...` söz diziminde Android işletim sistemi, WebView veya paket başlatıcı engeline takıldığında Intent'i çözemeyip otomatik olarak Play Store sayfasına yönlendiriyordu.
+* **E-Tablo ile Entegrasyon Durumu:**
+  * **Evet, kesinlikle entegredir.** Hanelerin adresleri ve harita konumları (`mapsUrl`) Google E-Tablonuzdaki **`Haneler`** sayfasında `G` sütununda (`mapsUrl`) saklanmaktadır.
+  * Formdan kaydedilen veya güncellenen GPS koordinatları (`https://maps.google.com/?q=LAT,LON`) ya da adresten üretilen harita linkleri anında E-Tabloya yazılır ve diğer tüm telefonların ekranına eşitlenir.
 
-* **Uygulanan Kesin Çözüm (Play Store Döngüsünden Muaf Yerel Protokoller):**
-  1. **Paket Kilitli Intent Yerine Standart `geo:` ve `google.navigation:` Protokolleri:**
-     * `package=com.google.android.apps.maps` içeren ve başarısızlık durumunda Play Store'a fırlatan tüm `intent://` URI yapıları kaldırıldı.
-     * **Canlı Navigasyon İçin:** Doğrudan Android yerel navigasyon şeması `google.navigation:q=LAT,LON&mode=d` (adres araması için `google.navigation:q=ADRES&mode=d`) devreye sokuldu. Bu şema telefonunuzdaki harita/navigasyon uygulamasını doğrudan sürüş modunda başlatır, Play Store'a asla yönlendirmez.
-     * **Haritada Gör İçin:** Evrensel RFC 5870 standardı olan `geo:LAT,LON?q=LAT,LON(İsim)` (adres için `geo:0,0?q=ADRES`) devreye sokuldu. Android işletim sistemi bu protokolü yerel olarak tanır ve cihazda yüklü harita uygulamasını iğneli pin ile anında açar.
-  2. **Platformlar Arası Tam Destek:**
-     * **Android:** `google.navigation:` ve `geo:` protokolleriyle Play Store'suz yerel açılış.
-     * **iOS (Apple):** Apple Haritalar (`maps://?daddr=...` ve `maps://?q=...`) ile doğrudan yerel açılış.
-     * **Masaüstü / Tarayıcı:** Standart Google Haritalar web yönlendirmesi.
+* **Canlı Navigasyon Neden Açılmıyordu ve Nasıl Çözüldü?**
+  1. **Paket Kilitli Intent Hatası:** Eski kodda Android paket ismi zorlaması (`package=com.google.android.apps.maps`) bulunuyordu. Android WebView veya TrebEdit gibi kısıtlı ortamlarda bu paket intent'i doğrudan çözülemeyince Android sistemi haritayı açmak yerine kullanıcıyı Google Play Store'daki indirme/güncelleme sayfasına atıyordu.
+  2. **Doğrudan Yerel Protokol (`google.navigation:`):** Play Store'a atma hatasını önlemek için `google.navigation:q=LAT,LON&mode=d` protokolü devreye alındı. Bu şema Android'in yerel navigasyon motorudur.
+  3. **Çift Kademeli Güvenli Fallback (Kesintisiz Navigasyon Güvencesi):**
+     * Bazı Android WebView tarayıcıları veya cihaz güvenlik ayarları `google.navigation:` protokolünü yakalamakta sessiz kalabilir.
+     * Bu durumu önlemek için sisteme akıllı bir **otomatik geçiş (fallback)** eklendi:
+     * Tıklandığında önce doğrudan yerel navigasyon şeması denenir.
+     * Eğer 600 milisaniye içinde cihazın harita uygulaması ön plana çıkmazsa, sistem beklemeden otomatik olarak Google Haritalar'ın doğrudan yol tarifi web/uygulama motoruna (`https://www.google.com/maps/dir/?api=1&destination=...`) geçiş yapar.
+     * Böylece cihazınız ne olursa olsun (Android, iOS, eski/yeni WebView, TrebEdit) navigasyon butonu **asla cevapsız kalmaz ve asla Google Play Store'a atmaz; kapıya kadar yol tarifini anında açar.**
 
 ### 19. 📱 Sayfa Kaydırma (Aşağı-Yukarı Hareket) ve Geri Tuşunda Uygulamadan Atma Çözümü
 

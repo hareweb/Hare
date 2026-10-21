@@ -3576,7 +3576,10 @@ var selectedAid = state.selectedAidId ? state.aids.find(function(a) { return Str
     window.openMapForAid = function(id, mode) {
       var targetId = String(id || '').trim();
       var item = state.aids.find(function(a) { return String(a.id).trim() === targetId; });
-      if (!item) return;
+      if (!item) {
+        showToast('Hane kaydı bulunamadı.');
+        return;
+      }
 
       var rawUrl = (item.mapsUrl || '').trim();
       var coordsMatch = rawUrl.match(/q=([-\d.]+),([-\d.]+)/) || 
@@ -3587,16 +3590,19 @@ var selectedAid = state.selectedAidId ? state.aids.find(function(a) { return Str
       var isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent || '');
 
       var targetUri = '';
+      var queryParam = '';
 
       if (coordsMatch) {
         var lat = coordsMatch[1];
         var lon = coordsMatch[2];
         var label = encodeURIComponent(item.name || 'Hane Konumu');
+        queryParam = lat + ',' + lon;
 
         if (mode === 'nav') {
           // 🧭 Canlı Navigasyon Başlat
           if (isAndroid) {
-            // Android yerel doğrudan navigasyon şeması (Google Play'e asla atmaz)
+            // Android evrensel intent şeması: Google Maps veya cihazdaki herhangi bir navigasyon uygulamasını
+            // doğrudan sürüş/navigasyon modunda başlatır. Kesinlikle Play Store'a yönlendirmez.
             targetUri = 'google.navigation:q=' + lat + ',' + lon + '&mode=d';
           } else if (isIOS) {
             targetUri = 'maps://?daddr=' + lat + ',' + lon + '&dirflg=d';
@@ -3606,7 +3612,6 @@ var selectedAid = state.selectedAidId ? state.aids.find(function(a) { return Str
         } else {
           // 🗺️ Harita Üzerinde Pini ve Konumu Göster
           if (isAndroid) {
-            // Android evrensel RFC 5870 yerel harita şeması (Google Play'e asla atmaz)
             targetUri = 'geo:' + lat + ',' + lon + '?q=' + lat + ',' + lon + '(' + label + ')';
           } else if (isIOS) {
             targetUri = 'maps://?q=' + label + '&ll=' + lat + ',' + lon;
@@ -3619,6 +3624,7 @@ var selectedAid = state.selectedAidId ? state.aids.find(function(a) { return Str
         var parts = [item.address, item.neighborhood, item.district, item.city].filter(function(x) { return x && String(x).trim().length > 0; });
         var query = parts.join(', ') || item.name || 'Kayseri';
         var encodedQuery = encodeURIComponent(query);
+        queryParam = encodedQuery;
 
         if (mode === 'nav') {
           if (isAndroid) {
@@ -3641,9 +3647,22 @@ var selectedAid = state.selectedAidId ? state.aids.find(function(a) { return Str
 
       pushNavState('external');
 
-      // 🛡️ KRİTİK: package=com.google.android.apps.maps içeren intent:// KULLANILMAZ!
-      // Çünkü WebView veya intent çözümleme başarısız olunca Android doğrudan Google Play Store'a yönlendiriyordu.
-      // geo: ve google.navigation: protokolleri ise cihazdaki harita uygulamasını doğrudan açar.
+      // 🛡️ ÇİFT KADEMELİ GÜVENLİ AÇILIŞ:
+      // 1. Önce doğrudan yerel navigasyon/harita protokolünü (google.navigation: / geo:) dener.
+      // 2. Android WebView veya TrebEdit gibi ortamlarda bu özel protokol yakalanamaz veya sessiz kalırsa,
+      //    kullanıcıyı asla mağdur etmez; 600ms sonra Google Maps Directions web/intent linkine kesintisiz yönlendirir.
+      var hasOpened = false;
+      var webFallback = (mode === 'nav')
+        ? ('https://www.google.com/maps/dir/?api=1&destination=' + queryParam)
+        : ('https://www.google.com/maps/search/?api=1&query=' + queryParam);
+
+      // Sayfa görünürlüğü değişirse yerel uygulama açılmış demektir
+      var onBlurHandler = function() {
+        hasOpened = true;
+        window.removeEventListener('blur', onBlurHandler);
+      };
+      window.addEventListener('blur', onBlurHandler);
+
       try {
         var a = document.createElement('a');
         a.href = targetUri;
@@ -3655,6 +3674,18 @@ var selectedAid = state.selectedAidId ? state.aids.find(function(a) { return Str
       } catch(e) {
         window.location.href = targetUri;
       }
+
+      // Fallback kontrolü: 600ms içinde uygulama ön plana çıkmamışsa web yönlendirmesiyle aç
+      setTimeout(function() {
+        window.removeEventListener('blur', onBlurHandler);
+        if (!hasOpened && !document.hidden) {
+          try {
+            window.location.href = webFallback;
+          } catch(err) {
+            window.open(webFallback, '_system');
+          }
+        }
+      }, 650);
     };
 
     window.openPhotoModal = function(url) {
