@@ -474,26 +474,54 @@ Uygulamanın tamamı Node.js sanal tarayıcı (VM) ortamında uçtan uca simüle
 
      * Yalnızca uygulama son kullanılanlardan kaydırılarak **tamamen kapatıldığında** (veya sağ üstten `🚪` Çıkış butonuna basıldığında) yeniden açılışta güvenlik için PIN kodu sorulur.
 
-
 ### 26. 📦 Sadeleştirilmiş Emanet Türleri (Eşya vb.), HD Fotoğraf Kalitesi, Android Chromium Geri Tuşu Çözümü ve Tam Sistem Denetimi
 
 1. **📦 Emanet Türü (İhtiyaç Kalemleri) Sadeleştirildi ve Genişletildi:**
+
    * Hem **Hane Ekle** hem **Hane Düzenle** hem de **Sandık (Kasa)** ekranlarındaki uzun ve parantezli ifadeler sadeleştirilerek sahada en çok ihtiyaç duyulan **10 net kategoriye** çıkarıldı:
+
      * `🥖 Gıda / Erzak`, `💵 Nakit Destek`, `🛋️ Ev Eşyası`, `🧺 Beyaz Eşya`, `🔥 Yakacak`, `👕 Giyim`, `💊 Sağlık / İlaç`, `🏠 Kira / Fatura`, `👶 Yetim / Eğitim`, `📦 Diğer`
+
    * **Geriye Dönük Tam Uyumluluk (`normalizeCategoryLabel`):** Daha önce eski uzun isimlerle (*"Gıda / Erzak (Yiyecek)"*, *"Kisve (Giyim / Kıyafet)"* vb.) kaydedilmiş haneler otomatik olarak yeni sade isimlere dönüştürülür; hiçbir eski veri kaybolmaz.
 
 2. **📸 Fotoğraf Kalite Ayarları HD Seviyeye Yükseltildi (`compressPhotoHD`):**
+
    * Eski `650px` ve `%55` düşük sıkıştırma ayarı kaldırıldı; yerine **1280px HD çözünürlük**, **%85 JPEG kalitesi** ve yüksek kaliteli bikübik keskinleştirme (`imageSmoothingQuality: 'high'`) getirildi.
+
    * **Akıllı Google E-Tablo Hücre Sınırı Koruması:** 3 fotoğraf yüklendiğinde Google E-Tablo'nun tek hücredeki 50.000 karakter sınırını aşmaması için otomatik boyut dengeleyici eklendi.
+
    * **Hane Düzenleme İçinden Fotoğraf Ekleme / Silme:** Artık mevcut bir hanenin bilgilerini düzenlerken (`Hane Bilgilerini Düzenle`) sonradan yeni HD fotoğraf ekleyebilir veya yanlış eklenmiş fotoğrafı silebilirsiniz. Ayrıca teslimat fotoğraflarına da silme (`✕`) butonu eklendi.
 
 3. **🔙 Android WebView Geri Tuşunun Uygulamayı Kapatması Kökten Çözüldü (Chromium User-Gesture Koruması):**
+
    * **Kök Sebep:** Android System WebView (Chromium), sayfa ilk açılırken (kullanıcı ekrana dokunmadan önce) eklenen `history.pushState` kayıtlarını güvenlik politikası (*History Manipulation Intervention*) gereği yok sayıp `canGoBack() = false` döndürerek uygulamayı kapatıyordu. Ayrıca önceki `click` dinleyicisinde bulunan `#hare-0` koşulu yeni kayıt eklenmesini engelliyordu.
+
    * **Kesin Çözüm:** Kısıtlayıcı koşul kaldırıldı; artık kullanıcının ekrana yaptığı her gerçek dokunuşta (`touchstart`, `touchend`, `click`) Android işletim sisteminin %100 geçerli saydığı kullanıcı etkileşimli (`user-activated`) geçmiş kaydı üretilir.
+
    * Hem `popstate`, hem `hashchange`, hem `backbutton`, hem de donanım geri tuşu (`keyCode: 4` / `GoBack`) yakalanarak yalnızca açık olan pencerenin/bölümün kapanması garanti altına alındı. Ayrıca tüm açılır pencerelerin sağ üst köşesine net **`← Geri`** butonu eklendi.
 
 4. **🔍 Tüm Sistem Taraması ve Sorunsuz Uygulama Standartlarında Ek İyileştirmeler:**
+
    * **Teslimat Fotoğraflarının Apps Script Güncellemesine Gerek Kalmadan Eşitlenmesi:** Teslimat fotoğrafları (`deliveryPhotos`), sunucuya gönderilirken `;delivery=1;base64,` imzasıyla paketlenir ve okunurken otomatik ayrıştırılır; böylece E-Tablo scriptinize yeni sütun eklemenize gerek kalmadan teslimat kanıtları tüm telefonlarda görünür.
+
    * **Gelişmiş Arama Motoru:** Hane araması artık yalnızca isim ve mahallede değil; **telefon numarası, açık adres, ihtiyaç kalemi (ör. "Ev Eşyası", "Beyaz Eşya") ve ilgilenen gönüllü** içinde de anında arama yapar.
+
    * **Genel Sandık Hızlı Filtre ve Arama:** Sandık geçmişine `Tümü`, `🟢 Teberru`, `🔴 İnfak`, `🏦 Banka`, `💵 Elden` filtreleri ve anlık arama kutusu eklendi.
+
    * **Kasa Düzenleme ve Excel CSV İyileştirmesi:** Kasa hareketi düzenleme penceresine (`Kasa Hareketini Düzenle`) **Kategori / Kalem** alanı ve Hane Düzenleme penceresine **Durum** alanı eklendi.
+### 27. 📱 Mobil APK / Uygulama Özel İyileştirmeleri: Aşağı Çekince Yenileme (Pull-to-Refresh) Kapatılması ve Geri Tuşu (1 Geri Ana Sayfa, 2 Geri Çıkış)
+
+* **1. Aşağı Çekince Yenileme (Pull-to-Refresh) Özelliğinin Kapatılması:**
+  * **Sorun:** Kullanıcı sayfadayken parmağıyla ekranı aşağı çektiğinde Android WebView motoru sayfayı yeniden yüklüyor, dönen yenileme çemberi çıkıyor ve uygulama sıfırlanıyordu.
+  * **Uygulanan Kesin Çözüm:**
+    * **CSS Düzeyi:** `html, body` etiketlerine `overscroll-behavior: none !important;` ve `overscroll-behavior-y: none !important;` eklendi.
+    * **JavaScript Dokunma Yakalayıcısı:** Hem `window` hem `document` seviyesinde `touchstart` ve `{ passive: false }` seçenekli `touchmove` dinleyicileri devreye alındı. Sayfa tepe noktasındayken (`scrollTop <= 0 && diffY > 0`) yapılan aşağı kaydırma hareketleri `e.preventDefault()` ile iptal edildi. Sayfa aşağı veya yukarı normal olarak kaymaya devam eder ancak hiçbir zaman sayfayı baştan yenilemez.
+    * **WebIntoApp APK Derleme Notu:** WebIntoApp kontrol panelinizde **"App Settings > Features"** menüsünde bulunan **"Swipe to Refresh / Pull to Refresh"** seçeneğini KAPALI (işaretsiz) tutarak APK derlediğinizde Android Java seviyesindeki çember yenileme de tamamen devre dışı kalır.
+
+* **2. Mobil APK Donanım Geri Tuşu Kuralı (1 Geri Ana Sayfa, 2 Geri Çıkış):**
+  * **Sorun:** Kullanıcı başka sekmelerdeyken veya ana sayfadayken geri tuşuna bastığında Android WebView geçmişinin tükenmesi sebebiyle uygulamanın aniden kapanması.
+  * **Uygulanan Çözüm (Kademeli Geri & Çift Tıkla Çıkış Motoru):**
+    * **1. Aşama (Açık Pencereler):** Hane Detayı, Düzenleme Formu, Fotoğraf İnceleme, PIN Değiştirme veya Kategori Listesi açıksa; geri tuşuna basıldığında yalnızca o pencere kapanır.
+    * **2. Aşama (Diğer Sekmelerden Ana Sayfaya Dönüş - 1 Geri):** Kullanıcı **Sandık**, **Hane Ekle (+)**, **Hayırsever** veya **Gönüllü** sekmesindeyken geri tuşuna bastığında **asla uygulamadan çıkmaz**; 1 geri basışla doğrudan **Haneler ana sayfasına** döner ve ekranda *"← Haneler ana sayfasına dönüldü."* bildirimi çıkar.
+    * **3. Aşama (Haneler Ana Sayfasında 1. Basış):** Kullanıcı zaten Haneler ana sayfasındayken geri tuşuna ilk kez bastığında uygulama kapanmaz; ekranda *"🚪 Çıkmak için tekrar basın"* uyarısı çıkar ve 3 saniyelik güvenli çıkış süresi başlar.
+    * **4. Aşama (Haneler Ana Sayfasında 2. Basış):** Kullanıcı gerçekten çıkmak istiyorsa ve 3 saniye içinde ikinci kez geri tuşuna basarsa, uygulama *"🚪 Hâre kapatılıyor..."* diyerek temizce kapanır. 3 saniye içinde ikinci basış gelmezse sayaç sıfırlanır, kazara kapanmalar önlenir.

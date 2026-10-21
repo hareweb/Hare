@@ -50,21 +50,20 @@
   </script>
 
   <style>
-    html {
+    html, body {
       min-height: 100%;
       -webkit-tap-highlight-color: transparent;
-      font-family: 'Plus Jakarta Sans', sans-serif;
-    }
-    body {
-      min-height: 100%;
-      -webkit-tap-highlight-color: transparent;
-      user-select: none;
-      -webkit-user-select: none;
       font-family: 'Plus Jakarta Sans', sans-serif;
       overflow-x: hidden;
       overflow-y: auto;
+      overscroll-behavior-y: none !important;
+      overscroll-behavior: none !important;
       touch-action: pan-y;
       -webkit-overflow-scrolling: touch;
+    }
+    body {
+      user-select: none;
+      -webkit-user-select: none;
     }
     body.modal-open {
       overflow: hidden !important;
@@ -4284,59 +4283,78 @@
     };
 
     // =========================================================================
-    // 🔙 GEZİNTİ VE GERİ TUŞU YÖNETİMİ (Android Chromium History Intervention Korumalı)
+    // 🚫 AŞAĞI KAYDIRINCA OLUŞAN YENİLEME ÖZELLİĞİNİ (PULL-TO-REFRESH) KESİN ENGELLEME
     // =========================================================================
-    var navStepCounter = 1;
-    var userActivatedGuards = 0;
-    var lastBackHandledAt = 0;
-    var isInternalHashChange = false;
+    var _pullTouchStartY = 0;
+    function handlePullTouchStart(e) {
+      if (e.touches && e.touches.length === 1) {
+        _pullTouchStartY = e.touches[0].clientY;
+      }
+    }
+    function handlePullTouchMove(e) {
+      if (e.touches && e.touches.length === 1) {
+        var currentY = e.touches[0].clientY;
+        var diffY = currentY - _pullTouchStartY;
+        var scrollPos = window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop || 0;
+        // Sayfa en tepedeyken aşağı çekilirse (Pull-to-refresh) WebView yenilemesini kesinlikle engelle
+        if (scrollPos <= 0 && diffY > 0) {
+          if (e.cancelable) {
+            e.preventDefault();
+          }
+        }
+      }
+    }
+    window.addEventListener("touchstart", handlePullTouchStart, { passive: true });
+    document.addEventListener("touchstart", handlePullTouchStart, { passive: true });
+    window.addEventListener("touchmove", handlePullTouchMove, { passive: false });
+    document.addEventListener("touchmove", handlePullTouchMove, { passive: false });
 
-    function pushNavState(type) {
+    // =========================================================================
+    // 🔙 ANDROİD APK GERİ TUŞU MOTORU: 1 GERİ ANASAYFA, 2 GERİ ÇIKIŞ
+    // =========================================================================
+    var lastBackHandledAt = 0;
+    var lastExitToastTime = 0;
+
+    // APK WebView canGoBack() yetkisini canlı tutmak için hash köprüsü
+    function armHomeHash() {
       try {
-        navStepCounter++;
-        userActivatedGuards++;
-        isInternalHashChange = true;
-        history.pushState({ hareNav: type || 'nav', step: navStepCounter, timestamp: Date.now() }, '', '#hare-' + navStepCounter);
-        setTimeout(function() { isInternalHashChange = false; }, 50);
+        if (window.location.hash !== "#ana") {
+          history.pushState({ hareNav: "ana" }, "", "#ana");
+        }
       } catch(e) {}
     }
 
-    function ensureHistoryBuffer() {
+    function pushNavState(type) {
       try {
-        navStepCounter++;
-        userActivatedGuards++;
-        isInternalHashChange = true;
-        history.pushState({ hareNav: 'guard', step: navStepCounter, ts: Date.now() }, '', '#hare-' + navStepCounter);
-        setTimeout(function() { isInternalHashChange = false; }, 50);
+        history.pushState({ hareNav: type || "sub" }, "", "#hare-" + Date.now());
       } catch(e) {}
     }
 
     function initHistoryGuard() {
       try {
-        history.replaceState({ hareNav: 'root', step: 0 }, '', '#hare-0');
-        history.pushState({ hareNav: 'guard', step: 1, ts: Date.now() }, '', '#hare-1');
-        navStepCounter = 2;
+        if (!window.location.hash || window.location.hash === "#" || window.location.hash === "#root") {
+          history.replaceState({ hareNav: "root" }, "", "#root");
+          history.pushState({ hareNav: "ana" }, "", "#ana");
+        }
       } catch(e) {}
     }
 
     window.handleBackNavigation = function() {
       var now = Date.now();
-      if (now - lastBackHandledAt < 120) return;
+      if (now - lastBackHandledAt < 150) return;
       lastBackHandledAt = now;
-
-      // 🛡️ Android WebView'de canGoBack()'in daima true kalmasını sağla (Uygulama asla kapanmasın)
-      ensureHistoryBuffer();
-      setTimeout(ensureHistoryBuffer, 10);
 
       // Giriş ekranındaysa geri tuşu uygulamayı kapatmasın
       if (!state.currentUser) {
+        armHomeHash();
         return;
       }
 
       // 0. Onay modalı açıksa sadece onay modalını kapat
-      var confirmModal = document.getElementById('custom-confirm-modal');
-      if (confirmModal && confirmModal.style.display !== 'none') {
+      var confirmModal = document.getElementById("custom-confirm-modal");
+      if (confirmModal && confirmModal.style.display !== "none") {
         closeCustomConfirm();
+        armHomeHash();
         return;
       }
 
@@ -4344,6 +4362,7 @@
       if (state.changingPin) {
         state.changingPin = false;
         render();
+        armHomeHash();
         return;
       }
 
@@ -4351,122 +4370,178 @@
       if (state.viewingPhotoUrl) {
         state.viewingPhotoUrl = null;
         render();
+        armHomeHash();
         return;
       }
 
-      // 3. Hane düzenleme modalı açıksa sadece düzenleme modalını kapat (Detaydan açıldıysa detaya döner)
+      // 3. Hane düzenleme modalı açıksa sadece düzenleme modalını kapat
       if (state.editingAidId) {
         closeEditAid();
+        armHomeHash();
         return;
       }
 
-      // 4. Diğer düzenleme modalları (Kasa, Hayırsever, Gönüllü) açıksa sadece o modalı kapat
+      // 4. Diğer düzenleme modalları (Kasa, Hayırsever, Gönüllü) açıksa sadece onu kapat
       if (state.editingBudgetId || state.editingDonorId || state.editingMemberId) {
         state.editingBudgetId = null;
         state.editingDonorId = null;
         state.editingMemberId = null;
         render();
+        armHomeHash();
         return;
       }
 
-      // 5. Hane detay modalı açıksa sadece detay modalını kapat
+      // 5. Hane detay modalı açıksa sadece detay modalını kapat ve listeye dön
       if (state.selectedAidId) {
         state.selectedAidId = null;
         render();
+        armHomeHash();
         return;
       }
 
-      // 6. Hayırsever detay (Hayır Defteri) bölümü açıksa kapat ve Hayırseverler listesine dön
+      // 6. Hayırsever detay (Hayır Defteri) bölümü açıksa kapat
       if (state.viewingDonorDetails) {
         state.viewingDonorDetails = null;
         saveNavState();
         render();
+        armHomeHash();
         return;
       }
 
-      // 7. Sorumlu kişisel kasa bölümü açıksa kapat ve Sandık ekranına dön
+      // 7. Sorumlu kişisel kasa bölümü açıksa kapat
       if (state.viewingMemberKasa) {
         state.viewingMemberKasa = null;
         saveNavState();
         render();
+        armHomeHash();
         return;
       }
 
-      // 8. Sandık alt sekmelerindeyse ('sorumlular' veya 'devirler') -> Genel Sandık'a dön
-      if (state.activeTab === 'kasa' && state.kasaSubTab !== 'genel') {
-        state.kasaSubTab = 'genel';
+      // 8. Sandık alt sekmelerindeyse ("sorumlular" veya "devirler") -> Genel Sandık a dön
+      if (state.activeTab === "kasa" && state.kasaSubTab !== "genel") {
+        state.kasaSubTab = "genel";
         saveNavState();
         render();
+        armHomeHash();
         return;
       }
 
-      // 9. Gönüllü alt sekmelerindeyse ('yonetim' veya 'gunluk') -> Gönüllü Rehberi'ne dön
-      if (state.activeTab === 'ekip' && state.adminSubTab !== 'rehber') {
-        state.adminSubTab = 'rehber';
+      // 9. Gönüllü alt sekmelerindeyse ("yonetim" veya "gunluk") -> Gönüllü Rehberi ne dön
+      if (state.activeTab === "ekip" && state.adminSubTab !== "rehber") {
+        state.adminSubTab = "rehber";
         saveNavState();
         render();
+        armHomeHash();
         return;
       }
 
       // 10. Kategori listeleme sayfası açıksa sadece listeyi kapat ve Haneler özetine dön
       if (state.viewingStatusList) {
         state.viewingStatusList = null;
-        state.searchQuery = '';
+        state.searchQuery = "";
         saveNavState();
         render();
+        armHomeHash();
         return;
       }
 
-      // 11. Başka bir ana bölümdeyse ('yeni', 'kasa', 'bagiscilar', 'ekip') -> o bölümü kapatıp Haneler ana ekranına dön
-      if (state.activeTab !== 'yardimlar') {
-        state.activeTab = 'yardimlar';
+      // 11. BAŞKA BİR ANA SEKMEDEYSE (yeni, kasa, bagiscilar, ekip) -> 1 GERİ: DOĞRUDAN HANELER ANA SAYFASINA DÖN!
+      if (state.activeTab !== "yardimlar") {
+        state.activeTab = "yardimlar";
         state.viewingStatusList = null;
         state.viewingMemberKasa = null;
         state.viewingDonorDetails = null;
         state.newPhotos = [];
         saveNavState();
         render();
+        showToast("← Haneler ana sayfasına dönüldü.");
+        armHomeHash();
         return;
       }
 
-      // 12. Zaten Haneler ana ekranındaysa: Uygulamayı ASLA kapatma, mevcut ekranda kal
+      // 12. ZATEN HANELER ANA SAYFASINDAYSA: 1. BASIŞTA UYARI VER, 2. BASIŞTA UYGULAMADAN ÇIK!
+      if (lastExitToastTime > 0 && (now - lastExitToastTime < 3000)) {
+        // 2. Basış (3 saniye içinde tekrar basıldı): Uygulamadan çık!
+        showToast("🚪 Hâre kapatılıyor...");
+        lastExitToastTime = 0;
+        try {
+          if (window.navigator && window.navigator.app && window.navigator.app.exitApp) {
+            window.navigator.app.exitApp();
+          } else if (window.navigator && window.navigator.device && window.navigator.device.exitApp) {
+            window.navigator.device.exitApp();
+          } else {
+            window.close();
+            history.go(-(history.length + 1));
+          }
+        } catch(e) {}
+      } else {
+        // 1. Basış: Uygulamadan ÇIKMA! Ekranda uyarı göster ve çıkış için 3 saniye tanı
+        lastExitToastTime = now;
+        showToast("🚪 Çıkmak için tekrar basın");
+        // Kullanıcı 3 saniye içinde basmazsa ana sayfa korumasını yeniden devreye al
+        setTimeout(function() {
+          if (Date.now() - lastExitToastTime >= 3000) {
+            lastExitToastTime = 0;
+            armHomeHash();
+          }
+        }, 3100);
+      }
     };
 
-    window.addEventListener('popstate', function(event) {
-      userActivatedGuards = Math.max(0, userActivatedGuards - 1);
+    window.addEventListener("popstate", function(event) {
       window.handleBackNavigation();
     });
 
-    window.addEventListener('hashchange', function(event) {
-      if (isInternalHashChange) return;
+    window.addEventListener("hashchange", function(event) {
       window.handleBackNavigation();
     });
 
-    // Android Cordova / WebIntoApp yerel donanım geri tuşu ve klavye geri tuşu köprüsü
-    document.addEventListener('backbutton', function(event) {
-      if (event && typeof event.preventDefault === 'function') event.preventDefault();
-      window.handleBackNavigation();
-    }, false);
-
-    window.addEventListener('keydown', function(event) {
-      if (event && (event.keyCode === 4 || event.key === 'GoBack' || event.key === 'BrowserBack')) {
-        if (typeof event.preventDefault === 'function') event.preventDefault();
+    // Android Cordova / WebIntoApp yerel donanım geri tuşu köprüsü
+    document.addEventListener("backbutton", function(event) {
+      var isAtHomeRoot = (state.activeTab === "yardimlar" && !state.selectedAidId && !state.editingAidId && !state.changingPin && !state.viewingPhotoUrl && !state.viewingStatusList && !state.viewingMemberKasa && !state.viewingDonorDetails);
+      var now = Date.now();
+      if (isAtHomeRoot && lastExitToastTime > 0 && (now - lastExitToastTime < 3000)) {
+        // 2. Basış: Çıkışa izin ver, preventDefault çağırma!
+        showToast("🚪 Hâre kapatılıyor...");
+        lastExitToastTime = 0;
+        try {
+          if (window.navigator && window.navigator.app && window.navigator.app.exitApp) {
+            window.navigator.app.exitApp();
+          }
+        } catch(e) {}
+      } else {
+        // 1. Basış veya alt ekran: Çıkışı engelle ve Hâre içi geri dön
+        if (event && typeof event.preventDefault === "function") event.preventDefault();
         window.handleBackNavigation();
       }
+    }, false);
+
+    window.addEventListener("keydown", function(event) {
+      if (event && (event.keyCode === 4 || event.key === "GoBack" || event.key === "BrowserBack")) {
+        var isAtHomeRoot = (state.activeTab === "yardimlar" && !state.selectedAidId && !state.editingAidId && !state.changingPin && !state.viewingPhotoUrl && !state.viewingStatusList && !state.viewingMemberKasa && !state.viewingDonorDetails);
+        var now = Date.now();
+        if (isAtHomeRoot && lastExitToastTime > 0 && (now - lastExitToastTime < 3000)) {
+          // 2. Basış: Çıkış
+          showToast("🚪 Hâre kapatılıyor...");
+          lastExitToastTime = 0;
+        } else {
+          if (typeof event.preventDefault === "function") event.preventDefault();
+          window.handleBackNavigation();
+        }
+      }
     });
 
-    // 🛡️ KRİTİK ANDROID CHROMIUM ÇÖZÜMÜ:
-    // Android WebView (Chromium), yalnızca kullanıcı ekrana dokunduğunda (User Gesture: touchend/click)
-    // eklenen history.pushState kayıtlarını geçerli sayar; sayfa açılışında eklenenleri atlar.
-    // Bu yüzden kullanıcının her gerçek dokunuşunda tamponu 8 kademeye kadar besliyoruz:
-    function feedUserGestureHistory() {
-      if (userActivatedGuards < 8) {
-        ensureHistoryBuffer();
+    // Kullanıcının ekrana dokunduğu her an (#ana) hash bağını canlı tut (Chromium Gesture Activation)
+    function touchActivateGuard() {
+      if (state.currentUser && state.activeTab === "yardimlar" && !state.selectedAidId && !state.editingAidId) {
+        if (window.location.hash !== "#ana") {
+          armHomeHash();
+        }
       }
     }
-    document.addEventListener('touchstart', feedUserGestureHistory, { passive: true });
-    document.addEventListener('touchend', feedUserGestureHistory, { passive: true });
-    document.addEventListener('click', feedUserGestureHistory, { passive: true });
+    window.addEventListener("touchstart", touchActivateGuard, { passive: true });
+    document.addEventListener("touchstart", touchActivateGuard, { passive: true });
+    document.addEventListener("click", touchActivateGuard, { passive: true });
 
     initHistoryGuard();
 
