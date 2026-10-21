@@ -70,25 +70,7 @@
     </div>
   </div>
 
-    <!-- 📍 HIZLI İL VE İLÇE SEÇİM LİSTELERİ (Kayseri Merkezli & Tüm Türkiye) -->
-  <datalist id="hareCityList">
-    <option value="Kayseri">
-    <option value="Sakarya">
-    <option value="İstanbul">
-    <option value="Ankara">
-    <option value="Kahramanmaraş">
-    <option value="Hatay">
-    <option value="Gaziantep">
-    <option value="Malatya">
-    <option value="Adıyaman">
-    <option value="Konya">
-    <option value="Sivas">
-    <option value="Yozgat">
-    <option value="Nevşehir">
-    <option value="Niğde">
-    <option value="Bursa">
-    <option value="İzmir">
-  </datalist>
+
 
   <div id="root" class="w-full max-w-md min-h-screen bg-slate-50 flex flex-col shadow-2xl relative pb-28 overflow-x-hidden"></div>
 
@@ -130,13 +112,48 @@
       if (cb) cb();
     };
 
+    // 🛡️ ZARARSIZ ARKA PLAN / UYKU AĞ HATALARINI FİLTRELEME MOTORU
+    function isBenignNetworkError(errStr) {
+      if (!errStr) return false;
+      var str = String(errStr).toLowerCase();
+      return str.includes('failed to fetch') ||
+             str.includes('networkerror') ||
+             str.includes('network request failed') ||
+             str.includes('aborterror') ||
+             str.includes('load failed') ||
+             str.includes('resizeobserver') ||
+             str.includes('script error') ||
+             str.includes('interrupted') ||
+             str.includes('connection reset') ||
+             str.includes('socket closed') ||
+             str.includes('err_internet_disconnected') ||
+             str.includes('offline');
+    }
+
+    window.closeDebugError = function() { var el = document.getElementById('debug-error'); if (el) el.style.display = 'none'; };
+
     window.onerror = function(msg, url, line) {
+      if (isBenignNetworkError(msg)) {
+        console.warn('Arka plan ağ/uyku uyarısı yok sayıldı:', msg);
+        return true;
+      }
       var el = document.getElementById('debug-error');
       if (el) {
-        el.style.display = 'block';
-        el.textContent = 'Sistem Uyarısı: ' + msg + ' (Satır: ' + line + ')';
+        el.className = 'fixed top-4 left-4 right-4 bg-rose-50 border border-rose-300 text-rose-800 p-3 rounded-2xl text-xs z-[110] text-center shadow-lg transition-all flex items-center justify-between';
+        el.innerHTML = '<span class="flex-1 text-left font-bold">' + esc('Sistem Uyarısı: ' + msg) + '</span><button type="button" onclick="closeDebugError()" class="ml-2 font-extrabold text-rose-700 text-sm px-1.5 py-0.5 rounded hover:bg-rose-100">✕</button>';
+        el.style.display = 'flex';
+        setTimeout(function() { if (el) el.style.display = 'none'; }, 4000);
       }
+      return true;
     };
+
+    window.addEventListener('unhandledrejection', function(event) {
+      var reason = event ? (event.reason ? (event.reason.message || event.reason) : event) : '';
+      if (isBenignNetworkError(reason)) {
+        event.preventDefault();
+        console.warn('Arka plan promise uyarısı yok sayıldı:', reason);
+      }
+    });
 
     // =========================================================================
     // 🔒 GÜVENLİK AYARLARI VE E-TABLO CANLI KÖPRÜSÜ
@@ -538,6 +555,11 @@
 
     async function syncFromGoogleSheet(silent) {
       if (!state.currentUser) return;
+      // Ekran kapalıysa veya internet kesikse sessiz periyodik istekleri beklet
+      if (silent && (document.hidden || (typeof navigator !== 'undefined' && 'onLine' in navigator && !navigator.onLine))) {
+        return;
+      }
+
       var activeEl = document.activeElement;
       var isTyping = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA');
       var isBusyWithForm = state.activeTab === 'yeni' || state.editingAidId || state.editingBudgetId || state.editingDonorId || state.editingMemberId;
@@ -547,11 +569,22 @@
         render();
       }
 
+      var controller = null;
+      var timeoutId = null;
+
       try {
+        if ('AbortController' in window) {
+          controller = new AbortController();
+          timeoutId = setTimeout(function() { controller.abort(); }, 9000);
+        }
+
         // 🔒 Önbellek Engelleme (Cache-Busting): Benzersiz zaman parametresi eklenir
-        // ÖNEMLİ: Özel header (Cache-Control/Pragma) kaldırıldı çünkü Google Apps Script OPTIONS preflight isteklerini desteklemez ve CORS hatası verir!
         var cacheBuster = '&_ts=' + Date.now() + '&_rnd=' + Math.floor(Math.random() * 1000000);
-        const res = await fetch(state.sheetUrl + '?token=' + encodeURIComponent(API_SECRET) + cacheBuster);
+        var fetchOpts = controller ? { signal: controller.signal } : {};
+        const res = await fetch(state.sheetUrl + '?token=' + encodeURIComponent(API_SECRET) + cacheBuster, fetchOpts);
+        if (timeoutId) clearTimeout(timeoutId);
+
+        if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         if (data && !data.error) {
           // Eğer o sırada kullanıcı bir silme/ekleme gönderiyorsa sunucudaki eski verinin yerel silinenleri geri getirmesini engelle
@@ -606,11 +639,12 @@
           }
         }
       } catch (err) {
-        console.warn('Veri eşitleme uyarısı:', err);
+        if (timeoutId) clearTimeout(timeoutId);
+        console.warn('Veri eşitleme uyarısı:', err && err.message ? err.message : err);
       } finally {
         state.isSyncing = false;
         checkAndPerformAutoDailyBackup();
-        if (!isTyping && !isBusyWithForm) {
+        if (!isTyping && !isBusyWithForm && !document.hidden) {
           render();
         }
       }
@@ -643,8 +677,14 @@
       state.isPushing = true;
       render();
 
+      var controller = null;
+      var timeoutId = null;
       try {
-        await fetch(state.sheetUrl, {
+        if ('AbortController' in window) {
+          controller = new AbortController();
+          timeoutId = setTimeout(function() { controller.abort(); }, 12000);
+        }
+        var pushOpts = {
           method: 'POST',
           body: JSON.stringify({
             token: API_SECRET,
@@ -660,9 +700,13 @@
               details: actionDetails || 'Kayıt güncellendi.'
             }
           })
-        });
+        };
+        if (controller) pushOpts.signal = controller.signal;
+        await fetch(state.sheetUrl, pushOpts);
+        if (timeoutId) clearTimeout(timeoutId);
       } catch (err) {
-        console.warn('E-Tablo yazma hatası:', err);
+        if (timeoutId) clearTimeout(timeoutId);
+        console.warn('E-Tablo yazma hatası:', err && err.message ? err.message : err);
       } finally {
         state.isPushing = false;
         state.isSyncing = false;
@@ -1556,7 +1600,7 @@
           '<h2 class="font-extrabold text-slate-900 text-lg font-display">Yeni Hane (İhtiyaç Sahibi Kardeşimiz) Kaydı</h2>' +
           '<div><label class="text-xs font-bold text-slate-500 uppercase">Hane (Aile) Adı</label><input id="newFullName" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm mt-1 font-semibold outline-none focus:ring-2 focus:ring-emerald-600" placeholder="Örn: Ahmet Amca / Yetim Ailesi" /></div>' +
           '<div class="grid grid-cols-3 gap-2">' +
-            '<div><label class="text-xs font-bold text-slate-500 uppercase">İl</label><input id="newCity" list="hareCityList" required value="Kayseri" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm mt-1 font-semibold outline-none focus:ring-2 focus:ring-emerald-600" placeholder="İl (Örn: Kayseri)" /></div>' +
+            '<div><label class="text-xs font-bold text-slate-500 uppercase">İl</label><input id="newCity" required value="Kayseri" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm mt-1 font-semibold outline-none focus:ring-2 focus:ring-emerald-600" placeholder="İl (Örn: Kayseri)" /></div>' +
             '<div><label class="text-xs font-bold text-slate-500 uppercase">İlçe</label><input id="newDistrict" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm mt-1 font-semibold outline-none focus:ring-2 focus:ring-emerald-600" placeholder="İlçe" /></div>' +
             '<div><label class="text-xs font-bold text-slate-500 uppercase">Mahalle</label><input id="newNeighborhood" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm mt-1 font-semibold outline-none focus:ring-2 focus:ring-emerald-600" placeholder="Mahalle" /></div>' +
           '</div>' +
@@ -2449,7 +2493,7 @@
             '<div class="flex justify-between items-center pb-2 border-b"><h3 class="font-extrabold text-slate-900 text-base font-display">Hane Bilgilerini Düzenle</h3><button type="button" onclick="closeEditAid()" class="w-7 h-7 bg-slate-100 rounded-full font-bold text-slate-500 text-xs">✕</button></div>' +
             '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Hane Adı / Rumuz</label><input id="editAidName" required value="' + esc(editingAid.name) + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:bg-white" /></div>' +
             '<div class="grid grid-cols-3 gap-2">' +
-              '<div><label class="text-[11px] font-bold text-slate-500 uppercase">İl</label><input id="editAidCity" list="hareCityList" required value="' + esc(editingAid.city || '') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
+              '<div><label class="text-[11px] font-bold text-slate-500 uppercase">İl</label><input id="editAidCity" required value="' + esc(editingAid.city || 'Kayseri') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" placeholder="İl" /></div>' +
               '<div><label class="text-[11px] font-bold text-slate-500 uppercase">İlçe</label><input id="editAidDistrict" required value="' + esc(editingAid.district) + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" placeholder="İlçe" /></div>' +
               '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Mahalle</label><input id="editAidNeighborhood" required value="' + esc(editingAid.neighborhood) + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
             '</div>' +
@@ -3860,10 +3904,35 @@
       syncFromGoogleSheet(true);
     }
     setInterval(function() {
-      if (state.currentUser && state.sheetUrl) {
+      // Ekran kapalıyken veya internet yokken veya halihazırda istek sürerken boşuna istek atma
+      if (document.hidden) return;
+      if (typeof navigator !== 'undefined' && 'onLine' in navigator && !navigator.onLine) return;
+      if (state.currentUser && state.sheetUrl && !state.isSyncing && !state.isPushing) {
         syncFromGoogleSheet(true);
       }
     }, 30000);
+
+    // 📱 EKRAN KAPANMA / UYKU KORUMASI VE OTOMATİK UYANMA MOTORU (Android & iOS WebView Uyumlu)
+    document.addEventListener('visibilitychange', function() {
+      if (!document.hidden) {
+        // Ekran açıldığında askıda kalmış durumları sıfırla
+        state.isSyncing = false;
+        state.isPushing = false;
+        // Telefonun Wi-Fi veya hücresel ağı uyanıp bağlanması için kısa bir pay (600ms) tanı
+        setTimeout(function() {
+          if (!document.hidden && (!('onLine' in navigator) || navigator.onLine) && state.currentUser && state.sheetUrl) {
+            syncFromGoogleSheet(true);
+          }
+        }, 600);
+      }
+    });
+
+    window.addEventListener('online', function() {
+      if (!document.hidden && state.currentUser && state.sheetUrl) {
+        state.isSyncing = false;
+        syncFromGoogleSheet(true);
+      }
+    });
 
   </script>
 </body>
