@@ -53,6 +53,7 @@
     h1, h2, h3, .font-display { font-family: 'Outfit', sans-serif; }
     .hide-scrollbar::-webkit-scrollbar { display: none; }
     .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    .safe-bottom-nav { padding-bottom: max(1.75rem, calc(env(safe-area-inset-bottom, 0px) + 1.25rem)); }
   </style>
 </head>
 <body class="bg-slate-100 text-slate-800 antialiased flex justify-center min-h-screen">
@@ -72,7 +73,7 @@
 
 
 
-  <div id="root" class="w-full max-w-md min-h-screen bg-slate-50 flex flex-col shadow-2xl relative pb-28 overflow-x-hidden"></div>
+  <div id="root" class="w-full max-w-md min-h-screen bg-slate-50 flex flex-col shadow-2xl relative pb-36 overflow-x-hidden"></div>
 
   <script>
     // XSS GÜVENLİ HATA İŞLEYİCİSİ (textContent Kullanımı)
@@ -2633,13 +2634,39 @@
         '</div>';
       }
 
-      // 5'Lİ ALT MENÜ (YUKARI ÇEKİLMİŞ & RAHAT DOKUNUŞLU FLOATING BAR)
-      html += '<nav class="fixed bottom-3 left-1/2 -translate-x-1/2 w-[92%] max-w-md bg-white/95 backdrop-blur-lg border border-slate-200/90 rounded-2xl shadow-2xl flex justify-around items-center py-2.5 z-40">' +
-        '<button onclick="setTab(\'yardimlar\')" class="flex flex-col items-center flex-1 active:scale-95 transition-transform ' + (state.activeTab === 'yardimlar' ? 'text-emerald-800 font-extrabold' : 'text-slate-400 font-medium') + '"><span class="text-lg">📋</span><span class="text-[10px] mt-0.5 font-bold">Haneler</span></button>' +
-        '<button onclick="setTab(\'kasa\')" class="flex flex-col items-center flex-1 active:scale-95 transition-transform ' + (state.activeTab === 'kasa' ? 'text-emerald-800 font-extrabold' : 'text-slate-400 font-medium') + '"><span class="text-lg">🗳️</span><span class="text-[10px] mt-0.5 font-bold">Sandık</span></button>' +
-        '<button onclick="setTab(\'yeni\')" class="flex flex-col items-center flex-1 active:scale-95 transition-transform ' + (state.activeTab === 'yeni' ? 'text-emerald-800 font-bold' : 'text-slate-400 font-medium') + '"><div class="w-11 h-11 -mt-7 bg-emerald-800 text-white rounded-full flex items-center justify-center text-2xl shadow-xl shadow-emerald-800/40 ring-4 ring-white active:scale-95 transition-transform">+</div><span class="text-[10px] mt-0.5 font-bold">Hane Ekle</span></button>' +
-        '<button onclick="setTab(\'bagiscilar\')" class="flex flex-col items-center flex-1 active:scale-95 transition-transform ' + (state.activeTab === 'bagiscilar' ? 'text-emerald-800 font-extrabold' : 'text-slate-400 font-medium') + '"><span class="text-lg">🤝</span><span class="text-[10px] mt-0.5 font-bold">Hayırsever</span></button>' +
-        '<button onclick="setTab(\'ekip\')" class="flex flex-col items-center flex-1 active:scale-95 transition-transform ' + (state.activeTab === 'ekip' ? 'text-emerald-800 font-extrabold' : 'text-slate-400 font-medium') + '"><span class="text-lg">👥</span><span class="text-[10px] mt-0.5 font-bold">Gönüllü</span></button>' +
+      // 5'Lİ ALT MENÜ (SABİTLENMİŞ TEMA YEŞİLİ ALT BAR - ANDROID GEZİNTİ ÇUBUĞU UYUMLU)
+      var navTabs = [
+        { id: 'yardimlar', icon: '📋', label: 'Haneler' },
+        { id: 'kasa', icon: '🗳️', label: 'Sandık' },
+        { id: 'yeni', icon: '+', label: 'Hane Ekle', isCenter: true },
+        { id: 'bagiscilar', icon: '🤝', label: 'Hayırsever' },
+        { id: 'ekip', icon: '👥', label: 'Gönüllü' }
+      ];
+
+      var navButtonsHTML = navTabs.map(function(tab) {
+        var isCurrent = state.activeTab === tab.id;
+        if (tab.isCenter) {
+          return '<button onclick="setTab(\'yeni\')" class="flex flex-col items-center flex-1 -mt-7 active:scale-95 transition-transform group" title="Yeni Hane Ekle">' +
+            '<div class="w-12 h-12 rounded-full ' + (isCurrent ? 'bg-emerald-400 text-emerald-950 shadow-emerald-400/50' : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/60') + ' ring-4 ring-emerald-950 flex items-center justify-center text-2xl font-black shadow-xl active:scale-90 transition-all leading-none pb-0.5">' +
+              '+' +
+            '</div>' +
+            '<span class="text-[10px] mt-1 font-extrabold ' + (isCurrent ? 'text-emerald-300' : 'text-emerald-200/90') + '">' + esc(tab.label) + '</span>' +
+          '</button>';
+        }
+
+        var textColor = isCurrent ? 'text-white font-extrabold' : 'text-emerald-300/70 hover:text-white font-semibold';
+        var labelColor = isCurrent ? 'text-emerald-200 font-extrabold' : 'text-emerald-300/70 font-bold';
+        var indicator = isCurrent ? '<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-0.5 shadow-[0_0_6px_#34d399]"></span>' : '<span class="w-1.5 h-1.5 mt-0.5 opacity-0"></span>';
+
+        return '<button onclick="setTab(\'' + tab.id + '\')" class="flex flex-col items-center flex-1 py-1 relative active:scale-95 transition-all ' + textColor + '">' +
+          '<span class="text-xl ' + (isCurrent ? 'scale-110 drop-shadow-sm' : 'opacity-80') + ' transition-transform">' + tab.icon + '</span>' +
+          '<span class="text-[10px] mt-0.5 ' + labelColor + ' tracking-tight">' + esc(tab.label) + '</span>' +
+          indicator +
+        '</button>';
+      }).join('');
+
+      html += '<nav class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-emerald-950/98 backdrop-blur-xl border-t border-emerald-800/80 shadow-[0_-8px_30px_rgba(0,0,0,0.35)] flex justify-around items-center pt-2.5 pb-7 px-1 z-40 rounded-t-3xl safe-bottom-nav">' +
+        navButtonsHTML +
       '</nav>';
 
       root.innerHTML = html;
@@ -3766,6 +3793,8 @@
     // =========================================================================
     // 🔙 GEZİNTİ VE GERİ TUŞU YÖNETİMİ (Android Donanım Geri Tuşu Koruması)
     // =========================================================================
+    var lastBackPressTime = 0;
+
     function pushNavState(type) {
       try {
         history.pushState({ hareNav: type, timestamp: Date.now() }, '');
@@ -3774,77 +3803,91 @@
 
     function ensureHistoryBuffer() {
       try {
-        // 🛡️ Android WebView'de canGoBack()'in daima true kalmasını ve uygulamanın kazara kapanmasını önleyen emniyet tamponu
+        // 🛡️ Android WebView'de canGoBack()'in daima true kalmasını sağlayan emniyet tamponu
         history.pushState({ hareNav: 'buffer', timestamp: Date.now() }, '');
       } catch(e) {}
     }
 
     window.addEventListener('popstate', function(event) {
-      // 🛡️ Harici WhatsApp veya telefon araması sonrası geri dönüldüğünde uygulamayı asla kapatma
+      // 🛡️ Harici WhatsApp veya telefon araması sonrası geri dönüldüğünde
       if (event.state && event.state.hareNav === 'external') {
         ensureHistoryBuffer();
         return;
       }
 
-      // Her geri tuşunda geçmiş tamponunu anında tazele (Android'in super.onBackPressed() ile uygulamayı öldürmesini engeller)
-      ensureHistoryBuffer();
-
-      // 0. Onay penceresi açıksa kapat
+      // 0. Onay modalı açıksa kapat
       var confirmModal = document.getElementById('custom-confirm-modal');
       if (confirmModal && confirmModal.style.display !== 'none') {
         closeCustomConfirm();
+        ensureHistoryBuffer();
         return;
       }
+
       // 1. PIN Değiştirme modalı açıksa kapat
       if (state.changingPin) {
         state.changingPin = false;
         render();
+        ensureHistoryBuffer();
         return;
       }
-      // 2. Hayırsever detay (Hayır Defteri) sayfası açıksa kapat
-      if (state.viewingDonorDetails) {
-        state.viewingDonorDetails = null;
-        saveNavState();
-        render();
-        return;
-      }
-      // 3. Sorumlu kişisel kasa sayfası açıksa kapat
-      if (state.viewingMemberKasa) {
-        state.viewingMemberKasa = null;
-        saveNavState();
-        render();
-        return;
-      }
-      // 4. Fotoğraf ışık kutusu açıksa kapat
+
+      // 2. Fotoğraf lightbox açıksa kapat
       if (state.viewingPhotoUrl) {
         state.viewingPhotoUrl = null;
         render();
+        ensureHistoryBuffer();
         return;
       }
-      // 5. Hane detay modalı açıksa kapat
+
+      // 3. Hane detay modalı açıksa kapat
       if (state.selectedAidId) {
         state.selectedAidId = null;
         render();
+        ensureHistoryBuffer();
         return;
       }
-      // 6. Düzenleme modalları açıksa kapat
+
+      // 4. Düzenleme modalları açıksa kapat
       if (state.editingAidId || state.editingBudgetId || state.editingDonorId || state.editingMemberId) {
         state.editingAidId = null;
         state.editingBudgetId = null;
         state.editingDonorId = null;
         state.editingMemberId = null;
         render();
+        ensureHistoryBuffer();
         return;
       }
-      // 7. Kategori listeleme sayfası açıksa anasayfaya dön
+
+      // 5. Hayırsever detay (Hayır Defteri) sayfası açıksa kapat
+      if (state.viewingDonorDetails) {
+        state.viewingDonorDetails = null;
+        saveNavState();
+        render();
+        ensureHistoryBuffer();
+        return;
+      }
+
+      // 6. Sorumlu kişisel kasa sayfası açıksa kapat
+      if (state.viewingMemberKasa) {
+        state.viewingMemberKasa = null;
+        saveNavState();
+        render();
+        ensureHistoryBuffer();
+        return;
+      }
+
+      // 7. Kategori listeleme sayfası açıksa kapat
       if (state.viewingStatusList) {
         state.viewingStatusList = null;
         state.searchQuery = '';
         saveNavState();
         render();
+        ensureHistoryBuffer();
         return;
       }
-      // 8. Başka bir sekmede ise (Hane Ekle 'yeni', Sandık 'kasa', Hayırsever 'bagiscilar', Gönüllü 'ekip') anasayfa (Haneler) sekmesine dön
+
+      // 8. Başka bir sekmede ise (Hane Ekle 'yeni', Sandık 'kasa', Hayırsever 'bagiscilar', Gönüllü 'ekip')
+      // UYGULAMADAN ASLA ÇIKMA! Haneler ana sayfasına dön
       if (state.activeTab !== 'yardimlar') {
         state.activeTab = 'yardimlar';
         state.viewingStatusList = null;
@@ -3854,13 +3897,33 @@
         saveNavState();
         render();
         showToast('← Haneler ana sayfasına dönüldü.');
+        ensureHistoryBuffer();
         return;
       }
-      // 9. Zaten anasayfada (Haneler) ve hiçbir pencere açık değilken geri tuşuna basıldıysa
-      showToast('Uygulamadan çıkmak için sağ üstteki Çıkış (🚪) butonunu kullanabilirsiniz.');
+
+      // 9. ZATEN HANELER ANA SAYFASINDA VE HİÇBİR PENCERE AÇIK DEĞİL
+      // 🚪 2 KERE BASILINCA ÇIKMA MOTORU (Double-Tap Back to Exit)
+      var now = Date.now();
+      if (now - lastBackPressTime < 2200) {
+        // 2 saniye içinde 2. kez basıldı -> Çıkışa izin ver!
+        showToast('Hâre kapatılıyor...');
+        try {
+          window.close();
+        } catch(e) {}
+        try {
+          if (window.history.length > 1) {
+            window.history.go(-(window.history.length));
+          }
+        } catch(e) {}
+      } else {
+        // İlk basış -> Kullanıcıyı uyar ve 2 saniyelik zaman tanı
+        lastBackPressTime = now;
+        showToast('🚪 Çıkmak için 2 saniye içinde tekrar basın');
+        ensureHistoryBuffer();
+      }
     });
 
-    // İlk açılışta geçmiş kökünü ve güvenlik tamponunu oluştur
+    // İlk açılışta geçmiş kökünü ve çok katmanlı güvenlik tamponunu oluştur
     try {
       history.replaceState({ hareNav: 'root' }, '');
       history.pushState({ hareNav: 'app' }, '');

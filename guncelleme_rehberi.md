@@ -133,21 +133,53 @@ Bu belgede, Hâre İnsani Yardım ve Ekip Koordinasyon Platformu'nda yapılan so
   * **3. Aşama (Ağ / Baz İstasyonu Fallback):** Kapalı mekan veya bodrum katı gibi GPS sinyalinin ulaşamadığı noktalarda otomatik olarak baz istasyonu/hücresel konum devreye sokulur.
 
   * **4. Aşama (Akıllı Adres Harita Üretimi):** Cihazda GPS tamamen kapalıysa veya izin verilmediyse formdaki İlçe, Mahalle ve Şehir bilgisi anında taranarak tek dokunuşla kusursuz Google Haritalar linkine dönüştürülür.
----
 
 ### 15. 🛰️ Mobil APK'da Konum İzninin Çıkmaması Sorunu ve Çözüm Rehberi
-- **Sorunun Asıl Sebebi (Kullanıcı Tespiti Doğrulandı):**
-  - Web sürümünü Chrome üzerinden açtığınızda Chrome zaten Android'in yerel konum yetkisine sahip olduğu için kullanıcıya *"Bu sitenin konumunuza erişmesine izin verilsin mi?"* penceresini çıkarır ve izin verilince GPS'i alır.
-  - Ancak WebIntoApp ile üretilen APK'larda durum farklıdır: Android işletim sistemi, bir uygulamanın (APK) donanım GPS'ine erişebilmesi için APK paketinin içindeki `AndroidManifest.xml` dosyasında `<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />` yetkisini şart koşar.
-  - WebIntoApp'te APK üretilirken **"App Settings > Permissions"** sekmesindeki **"Location (GPS)"** kutucuğu işaretlenmemişse; Android işletim sistemi APK'nın konuma erişim hakkı olmadığını bildiği için kullanıcıya **izin sorma penceresini dahi açmaz**; isteği işletim sistemi seviyesinde doğrudan ve sessizce engeller. Bu yüzden uygulama ekranda bekler ve zaman aşımına uğrar.
 
-- **APK'da Gerçek GPS İznini Açmak İçin Yapılması Gereken (WebIntoApp Ayarı):**
+* **Sorunun Asıl Sebebi (Kullanıcı Tespiti Doğrulandı):**
+
+  * Web sürümünü Chrome üzerinden açtığınızda Chrome zaten Android'in yerel konum yetkisine sahip olduğu için kullanıcıya *"Bu sitenin konumunuza erişmesine izin verilsin mi?"* penceresini çıkarır ve izin verilince GPS'i alır.
+
+  * Ancak WebIntoApp ile üretilen APK'larda durum farklıdır: Android işletim sistemi, bir uygulamanın (APK) donanım GPS'ine erişebilmesi için APK paketinin içindeki `AndroidManifest.xml` dosyasında `<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />` yetkisini şart koşar.
+
+  * WebIntoApp'te APK üretilirken **"App Settings > Permissions"** sekmesindeki **"Location (GPS)"** kutucuğu işaretlenmemişse; Android işletim sistemi APK'nın konuma erişim hakkı olmadığını bildiği için kullanıcıya **izin sorma penceresini dahi açmaz**; isteği işletim sistemi seviyesinde doğrudan ve sessizce engeller. Bu yüzden uygulama ekranda bekler ve zaman aşımına uğrar.
+
+* **APK'da Gerçek GPS İznini Açmak İçin Yapılması Gereken (WebIntoApp Ayarı):**
+
   1. [WebIntoApp.com](https://www.webIntoApp.com) kontrol panelinize girin ve projenizi açın.
+
   2. Sol menüden **Settings (Ayarlar) > Permissions (İzinler)** sekmesine gelin.
+
   3. **"Location (GPS)"** veya **"Geolocation"** seçeneğini **AKTİF (Açık)** yapın.
+
   4. Yeni APK'yı indirip telefonunuza kurduğunuzda, telefon ilk basışta *"Hâre uygulamasının cihaz konumuna erişmesine izin verilsin mi?"* sistem kutusunu ekrana çıkaracaktır.
 
-- **Uygulama İçinde Yapılan İyileştirmeler (Sahte Beklemeye Son Verildi):**
-  - **Hızlı Teşhis (3.5 Saniye):** Konum butonuna basıldığında Android 3.5 saniye içinde izin penceresi açmıyorsa (APK izninin olmadığı kesinleştiğinde), artık sahte sayaçlarla 20 saniye bekletilmez.
-  - **Otomatik Adres Linki Üretimi:** Sistem APK'nın izin penceresi açmadığını hemen anlayıp formdaki Mahalle, İlçe ve Şehir bilgisinden anında kusursuz Google Haritalar navigasyon linkini üretir ve kutuya doldurur.
-  - **"Adresten Üret" Butonu:** Sahada GPS izniyle veya uydu aramayla hiç vakit kaybetmek istemeyen gönüllüler için **"🗺️ Adresten Üret"** butonu tek dokunuşla hazır durumdadır.
+* **Uygulama İçinde Yapılan İyileştirmeler (Sahte Beklemeye Son Verildi):**
+
+  * **Hızlı Teşhis (3.5 Saniye):** Konum butonuna basıldığında Android 3.5 saniye içinde izin penceresi açmıyorsa (APK izninin olmadığı kesinleştiğinde), artık sahte sayaçlarla 20 saniye bekletilmez.
+
+  * **Otomatik Adres Linki Üretimi:** Sistem APK'nın izin penceresi açmadığını hemen anlayıp formdaki Mahalle, İlçe ve Şehir bilgisinden anında kusursuz Google Haritalar navigasyon linkini üretir ve kutuya doldurur.
+
+  * **"Adresten Üret" Butonu:** Sahada GPS izniyle veya uydu aramayla hiç vakit kaybetmek istemeyen gönüllüler için **"🗺️ Adresten Üret"** butonu tek dokunuşla hazır durumdadır.
+---
+
+### 16. 🚪 Geri Tuşunda 2 Kez Basarak Çıkma (Double-Tap Back to Exit)
+- **Sorun:** Kullanıcı ana sayfadayken yanlışlıkla geri tuşuna bastığında veya sekmeler arasında gezinirken uygulamanın aniden kapanması.
+- **Çözüm (Mobil Standart 2 Kere Basma Koruması):**
+  1. **Alt Sayfalar ve Sekmelerde:** Hane Ekleme formundayken, Sandık, Hayırsever veya Gönüllü sekmelerindeyken veya herhangi bir pencere/modal açıkken geri tuşuna basıldığında **uygulama kesinlikle kapanmaz**; açık pencereyi kapatır veya güvenle **Haneler** ana sayfasına döner (`← Haneler ana sayfasına dönüldü`).
+  2. **Ana Sayfada İlk Basış:** Kullanıcı zaten Haneler ana sayfasındayken geri tuşuna basarsa uygulama kapanmaz; ekranda **"🚪 Çıkmak için 2 saniye içinde tekrar basın"** bildirimi çıkar.
+  3. **Ana Sayfada İkinci Basış (2 Saniye İçinde):** Kullanıcı gerçekten çıkmak istiyorsa ve 2 saniye içinde tekrar geri tuşuna basarsa, uygulama **"Hâre kapatılıyor..."** diyerek güvenle ve temiz bir şekilde kapanır. 2 saniyeden fazla süre geçerse sayaç sıfırlanır, kazara kapanmalar tamamen önlenir.
+
+---
+
+### 17. 📱 Alt Menü Tasarımı ve Tema Yeşili Sabitlemesi (Android Gezinti Çubuğu Çakışma Çözümü)
+- **Sorun:** Eski tasarımda alt menü çubuğu sayfa tabanının biraz yukarısında yüzen beyaz bir kart (`bottom-3 rounded-2xl bg-white`) şeklindeydi. Bu durum telefonun kendi Android sanal gezinti çubuğunun (üçgen geri, daire ana ekran, kare son uygulamalar tuşları) menü butonlarının ve metinlerinin ("Haneler", "Sandık", "Hane Ekle", "Hayırsever", "Gönüllü") tam üzerine binmesine ve tuşların birbiriyle karışarak okunamaz hale gelmesine neden oluyordu.
+- **Çözüm:**
+  1. **Tabana Sabitlenmiş Gövde (Docked Bar):** Alt menü çubuğu ekranın en alt tabanına (`bottom-0`) sıfırlandı ve genişliği ekranı tam dolduracak şekilde (`w-full max-w-md`) genişletildi.
+  2. **Tema Yeşili Zemin Dolgusu:** Menünün tamamı ve telefonun gezinti tuşlarının altına denk gelen alan zengin tema zümrüt yeşili (`bg-emerald-950` / `#064e3b`) ile kaplandı; üst kısmına şık bir `border-t border-emerald-800/80` ve `rounded-t-3xl` kavis eklendi.
+  3. **Güvenli Alan Dolgusu (Safe Area Padding):** Butonların altına `pb-7` ve `max(1.75rem, calc(env(safe-area-inset-bottom) + 1.25rem))` güvenlik payı eklendi. Android'in sanal tuşları bu boşlukta tamamen tema yeşili zemin üzerinde kalır ve buton etiketlerini kesinlikle kapatamaz.
+  4. **Yüksek Kontrastlı Butonlar ve Merkez Tuş:**
+     - Aktif sekme: Zümrüt parıltılı gösterge noktası, parlak beyaz başlık (`text-white font-extrabold`) ve nane yeşili etiket.
+     - Pasif sekmeler: Açık nane/yeşil tonlarında yüksek okunurluk (`text-emerald-300/70`).
+     - "+ Hane Ekle" butonu: Menünün üstünden hafifçe taşan, `ring-4 ring-emerald-950` zırhlı ve canlı zümrüt yeşili (`bg-emerald-600`) büyük yuvarlak buton.
+  5. **İçerik Kaydırma Boşluğu:** Ana sayfa ve alt listelerin alt boşluğu `pb-28`'den `pb-36`'ya çıkarılarak en alttaki son kayıtların da menü arkasında kalmadan rahatça görüntülenmesi sağlandı.
