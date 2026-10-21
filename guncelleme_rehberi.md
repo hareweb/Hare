@@ -161,42 +161,87 @@ Bu belgede, Hâre İnsani Yardım ve Ekip Koordinasyon Platformu'nda yapılan so
   * **Otomatik Adres Linki Üretimi:** Sistem APK'nın izin penceresi açmadığını hemen anlayıp formdaki Mahalle, İlçe ve Şehir bilgisinden anında kusursuz Google Haritalar navigasyon linkini üretir ve kutuya doldurur.
 
   * **"Adresten Üret" Butonu:** Sahada GPS izniyle veya uydu aramayla hiç vakit kaybetmek istemeyen gönüllüler için **"🗺️ Adresten Üret"** butonu tek dokunuşla hazır durumdadır.
----
 
 ### 16. 🚪 Geri Tuşunda 2 Kez Basarak Çıkma (Double-Tap Back to Exit)
-- **Sorun:** Kullanıcı ana sayfadayken yanlışlıkla geri tuşuna bastığında veya sekmeler arasında gezinirken uygulamanın aniden kapanması.
-- **Çözüm (Mobil Standart 2 Kere Basma Koruması):**
+
+* **Sorun:** Kullanıcı ana sayfadayken yanlışlıkla geri tuşuna bastığında veya sekmeler arasında gezinirken uygulamanın aniden kapanması.
+
+* **Çözüm (Mobil Standart 2 Kere Basma Koruması):**
+
   1. **Alt Sayfalar ve Sekmelerde:** Hane Ekleme formundayken, Sandık, Hayırsever veya Gönüllü sekmelerindeyken veya herhangi bir pencere/modal açıkken geri tuşuna basıldığında **uygulama kesinlikle kapanmaz**; açık pencereyi kapatır veya güvenle **Haneler** ana sayfasına döner (`← Haneler ana sayfasına dönüldü`).
+
   2. **Ana Sayfada İlk Basış:** Kullanıcı zaten Haneler ana sayfasındayken geri tuşuna basarsa uygulama kapanmaz; ekranda **"🚪 Çıkmak için 2 saniye içinde tekrar basın"** bildirimi çıkar.
+
   3. **Ana Sayfada İkinci Basış (2 Saniye İçinde):** Kullanıcı gerçekten çıkmak istiyorsa ve 2 saniye içinde tekrar geri tuşuna basarsa, uygulama **"Hâre kapatılıyor..."** diyerek güvenle ve temiz bir şekilde kapanır. 2 saniyeden fazla süre geçerse sayaç sıfırlanır, kazara kapanmalar tamamen önlenir.
 
----
-
 ### 17. 📱 Alt Menü Tasarımı: Beyaz Menü Kartı + Tema Yeşili Sistem Tuşları Barı
-- **Kullanıcı Talebi:** Uygulamanın 5 bölümü (Haneler, Sandık, Hane Ekle, Hayırsever, Gönüllü) önceki beyaz, yuvarlak hatlı ve şık tasarımında kalsın; telefonun alt sanal tuşlarının / hareket çubuğunun bulunduğu zemin ise sistemin zümrüt yeşili (`#065f46`) ile kaplansın.
-- **Uygulanan Çözüm (Çift Katmanlı Alt Çubuk Mimarisi):**
+
+* **Kullanıcı Talebi:** Uygulamanın 5 bölümü (Haneler, Sandık, Hane Ekle, Hayırsever, Gönüllü) önceki beyaz, yuvarlak hatlı ve şık tasarımında kalsın; telefonun alt sanal tuşlarının / hareket çubuğunun bulunduğu zemin ise sistemin zümrüt yeşili (`#065f46`) ile kaplansın.
+
+* **Uygulanan Çözüm (Çift Katmanlı Alt Çubuk Mimarisi):**
+
   1. **Bizim Bölümler (Beyaz Menü Kartı):**
-     - Zemin: Arka planı hafif buzlu beyaz (`bg-white/98 backdrop-blur-xl`), üst köşeleri kavisli (`rounded-t-3xl`), üst kenarlık (`border-t border-slate-200/90`) ve yumuşak gölge (`shadow-[0_-8px_30px_rgba(0,0,0,0.12)]`).
-     - Butonlar: `188450.jpg` ekranındaki özgün beyaz zeminli tasarım korundu. Aktif sekmede koyu zümrüt yeşili başlık (`text-emerald-800 font-extrabold`) ve altında yeşil parıltılı nokta gösterge yer alır. Pasif sekmeler sade ve net gri/slate tonlarındadır.
-     - Merkez "+ Hane Ekle": Menünün üstünden hafifçe taşan, koyu yeşil halkalı (`ring-4 ring-emerald-950`) ve canlı zümrüt yeşili yuvarlak eylem butonu.
+
+     * Zemin: Arka planı hafif buzlu beyaz (`bg-white/98 backdrop-blur-xl`), üst köşeleri kavisli (`rounded-t-3xl`), üst kenarlık (`border-t border-slate-200/90`) ve yumuşak gölge (`shadow-[0_-8px_30px_rgba(0,0,0,0.12)]`).
+
+     * Butonlar: `188450.jpg` ekranındaki özgün beyaz zeminli tasarım korundu. Aktif sekmede koyu zümrüt yeşili başlık (`text-emerald-800 font-extrabold`) ve altında yeşil parıltılı nokta gösterge yer alır. Pasif sekmeler sade ve net gri/slate tonlarındadır.
+
+     * Merkez "+ Hane Ekle": Menünün üstünden hafifçe taşan, koyu yeşil halkalı (`ring-4 ring-emerald-950`) ve canlı zümrüt yeşili yuvarlak eylem butonu.
+
   2. **Tuşların Barı (Sistemin Yeşili):**
-     - Beyaz menü kartının hemen altına ekranın en tabanına oturan `safe-system-bar` eklendi.
-     - Rengi: Hâre'nin ana tema yeşili (`#065f46` / `bg-emerald-900`).
-     - Yüksekliği: `max(1.5rem, calc(env(safe-area-inset-bottom, 0px) + 0.6rem))` (asgari 24px - 34px).
-     - Sonuç: Android'in 3 sanal gezinti tuşu (üçgen geri, daire ana ekran, kare son uygulamalar) veya yatay hareket çizgisi tamamen bu zümrüt yeşili zemin üzerinde kalır; yukarıdaki beyaz menü butonlarıyla ve yazılarıyla asla çakışmaz.
+
+     * Beyaz menü kartının hemen altına ekranın en tabanına oturan `safe-system-bar` eklendi.
+
+     * Rengi: Hâre'nin ana tema yeşili (`#065f46` / `bg-emerald-900`).
+
+     * Yüksekliği: `max(1.5rem, calc(env(safe-area-inset-bottom, 0px) + 0.6rem))` (asgari 24px - 34px).
+
+     * Sonuç: Android'in 3 sanal gezinti tuşu (üçgen geri, daire ana ekran, kare son uygulamalar) veya yatay hareket çizgisi tamamen bu zümrüt yeşili zemin üzerinde kalır; yukarıdaki beyaz menü butonlarıyla ve yazılarıyla asla çakışmaz.
+
   3. **İçerik Kaydırma Boşluğu:** Sayfa altlarındaki son kayıtların menü arkasında kaybolmaması için ana gövde alt boşluğu `pb-36` seviyesinde tutuldu.
 
----
+### 18. 🗺️ Harita ve Navigasyonda Google Play Store'a Atma Sorununun Kökten Çözümü
 
-### 18. 🗺️ Harita Butonunda "Tarayıcınızı Güncelleyin" / Play Store Döngüsünün Kökten Çözümü
-- **Videodaki Sorun (188454.mp4 Analizi):**
-  - Kullanıcı hane detay penceresinde **"Google Haritalar'da Aç / Yol Tarifi"** butonuna bastığında; Android WebView (TrebEdit / APK) `https://www.google.com/maps/...` bağlantısını `target="_blank"` ile kendi gömülü iç tarayıcısında açmaya çalışıyordu.
-  - Google Haritalar web sürümü, kısıtlı mobil WebView tarayıcılarını desteklemediği için haritayı yüklemeyi reddedip ekrana **"Google Haritalar'ı kullanmak için tarayıcınızı güncelleyin"** uyarısını çıkarıyor ve kullanıcıyı Play Store indirme sayfasına yönlendiriyordu. Play Store'da Google Haritalar zaten kurulu olduğu için kullanıcı haritaya ulaşamadan çıkmak zorunda kalıyordu.
-- **Uygulanan Çözüm:**
-  1. **Doğrudan Yerel Uygulama Intent'i (Android Intent & geo URI):**
-     - Web URL'si yerine doğrudan cihazda yüklü olan Google Haritalar uygulamasını çalıştıran `intent://maps.google.com/...#Intent;scheme=https;package=com.google.android.apps.maps;...` ve `geo:` protokolü entegre edildi.
-     - `target="_blank"` kaldırıldı; WhatsApp ve telefon arama mekanizmasında olduğu gibi Intent doğrudan Android işletim sistemine iletildi.
-  2. **İki Ayrı Net Eylem Butonu:**
-     - **🗺️ Haritada Gör:** Hanenin konumunu Google Haritalar uygulamasında işaretli pin olarak açar.
-     - **🧭 Canlı Navigasyon:** Saha gönüllüsünün yola çıkıp hane kapısına kadar sesli navigasyonla gitmesi için Google Haritalar'ın canlı yol tarifini doğrudan başlatır (`dirflg=d`).
-  3. **Çoklu Platform Uyumluluğu:** Android'de yerel Google Haritalar uygulaması, iOS cihazlarda Apple Haritalar (`maps://`), masaüstünde ise web tarayıcı sürümü otomatik olarak devreye girer.
+* **Karşılaşılan Sorun ve Teknik Analiz:**
+  * Hane detayındaki **"🗺️ Haritada Gör"** veya **"🧭 Canlı Navigasyon"** butonlarına basıldığında, uygulama haritayı açmak yerine Google Play Store'daki Google Haritalar indirme/güncelleme sayfasına fırlatıyordu.
+  * **Teknik Sebebi:** Daha önce kullanılan `intent://maps.google.com/...#Intent;package=com.google.android.apps.maps;...` söz diziminde Android işletim sistemi, WebView veya paket başlatıcı engeline takıldığında Intent'i çözemeyip otomatik olarak Play Store sayfasına yönlendiriyordu.
+
+* **Uygulanan Kesin Çözüm (Play Store Döngüsünden Muaf Yerel Protokoller):**
+  1. **Paket Kilitli Intent Yerine Standart `geo:` ve `google.navigation:` Protokolleri:**
+     * `package=com.google.android.apps.maps` içeren ve başarısızlık durumunda Play Store'a fırlatan tüm `intent://` URI yapıları kaldırıldı.
+     * **Canlı Navigasyon İçin:** Doğrudan Android yerel navigasyon şeması `google.navigation:q=LAT,LON&mode=d` (adres araması için `google.navigation:q=ADRES&mode=d`) devreye sokuldu. Bu şema telefonunuzdaki harita/navigasyon uygulamasını doğrudan sürüş modunda başlatır, Play Store'a asla yönlendirmez.
+     * **Haritada Gör İçin:** Evrensel RFC 5870 standardı olan `geo:LAT,LON?q=LAT,LON(İsim)` (adres için `geo:0,0?q=ADRES`) devreye sokuldu. Android işletim sistemi bu protokolü yerel olarak tanır ve cihazda yüklü harita uygulamasını iğneli pin ile anında açar.
+  2. **Platformlar Arası Tam Destek:**
+     * **Android:** `google.navigation:` ve `geo:` protokolleriyle Play Store'suz yerel açılış.
+     * **iOS (Apple):** Apple Haritalar (`maps://?daddr=...` ve `maps://?q=...`) ile doğrudan yerel açılış.
+     * **Masaüstü / Tarayıcı:** Standart Google Haritalar web yönlendirmesi.
+
+### 19. 📱 Sayfa Kaydırma (Aşağı-Yukarı Hareket) ve Geri Tuşunda Uygulamadan Atma Çözümü
+
+* **Videodaki Sorunlar (188455.mp4 Analizi):**
+
+  1. **Sayfa Aşağı İniyor Ama Geri Yukarı Çıkmıyor:** Sayfada veya hane detay penceresinde aşağı kaydırıldıktan sonra parmakla yukarı itildiğinde ekran kilitleniyor ve yukarı kaymıyordu. Bunun teknik sebebi, hem sayfa gövdesinin (`window`) hem de `<main>` etiketinin aynı anda `overflow-y-auto` barındırması ve `body` üzerindeki `overscroll-behavior-y: contain` kuralının Android dokunmatik kaydırmasını (touch-scroll) tek yöne hapsetmesiydi. Ayrıca pencerelerdeki fotoğraflar üzerinde parmak kaydırılırken tarayıcının resmi sürüklemeye çalışması dokunmayı yutuyordu.
+
+  2. **Geri Tuşu Geri Geleceğine Uygulamadan Atıyor:** Kullanıcı hane detayındayken veya alt sekmelerdeyken geri tuşuna bastığında, geçmiş tamponunun tükenmesi veya `history.go(-length)` fonksiyonunun Android WebView'i zorla kapatması sebebiyle uygulama kapanıp TrebEdit'e/ana ekrana fırlatıyordu.
+
+* **Uygulanan Kesin Çözümler:**
+
+  1. **Doğal ve Akıcı 120Hz Çift Yönlü Kaydırma:**
+
+     * `<main>` etiketi üzerindeki çakışan `overflow-y-auto` kaldırıldı; tüm sayfa kaydırması doğrudan ana pencere (`window / body`) seviyesinde birleştirildi.
+
+     * `body` üzerindeki dokunma kilidi (`overscroll-behavior-y: contain`) kaldırıldı; yerine standart `-webkit-overflow-scrolling: touch` ve `touch-action: pan-y` eklendi. Sayfa artık aşağı ve yukarı kesintisiz, takılmadan akar.
+
+     * Pencereler açıldığında arka plan otomatik kilitlenir (`body.modal-open { overflow: hidden }`); pencere içindeki kaydırma alanına özel `.modal-scroll-body` ve fotoğraflara `-webkit-user-drag: none` tanımlanarak fotoğrafların üzerinden kaydırırken bile takılma sorunu tamamen giderildi.
+
+  2. **Geri Tuşunda Uygulamadan Asla Atmama Güvencesi:**
+
+     * Android'in `canGoBack()` denetimini her an açık tutan otomatik döngüsel geçmiş tamponu (`ensureHistoryBuffer`) devreye sokuldu.
+
+     * Geri tuşuna basıldığında:
+
+       * Hane detay penceresi açıksa **pencere kapanır ve listeye dönülür**.
+
+       * Hane Ekleme, Sandık, Hayırsever veya Gönüllü sekmesindeyse **doğrudan Haneler ana sayfasına dönülür**.
+
+       * Zaten Haneler ana sayfasındaysa **uygulamadan kesinlikle atmaz**; ekranda *"ℹ️ Çıkış yapmak için sağ üstteki 🚪 butonunu kullanabilirsiniz"* uyarısı verir ve kullanıcıyı güvenle uygulamada tutar.

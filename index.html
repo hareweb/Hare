@@ -50,7 +50,35 @@
   </script>
 
   <style>
-    body { -webkit-tap-highlight-color: transparent; user-select: none; font-family: 'Plus Jakarta Sans', sans-serif; overscroll-behavior-y: contain; }
+    html {
+      min-height: 100%;
+      -webkit-tap-highlight-color: transparent;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+    }
+    body {
+      min-height: 100%;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      -webkit-user-select: none;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      overflow-x: hidden;
+      overflow-y: auto;
+      touch-action: pan-y;
+      -webkit-overflow-scrolling: touch;
+    }
+    body.modal-open {
+      overflow: hidden !important;
+      touch-action: none !important;
+    }
+    .modal-scroll-body {
+      -webkit-overflow-scrolling: touch !important;
+      overscroll-behavior: contain !important;
+      touch-action: pan-y !important;
+    }
+    img {
+      -webkit-user-drag: none;
+      user-drag: none;
+    }
     h1, h2, h3, .font-display { font-family: 'Outfit', sans-serif; }
     .hide-scrollbar::-webkit-scrollbar { display: none; }
     .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
@@ -1401,7 +1429,15 @@
         return;
       }
 
-      var selectedAid = state.selectedAidId ? state.aids.find(function(a) { return String(a.id).trim() === String(state.selectedAidId).trim(); }) : null;
+            var isAnyModalOpen = selectedAid || (isAdmin && editingAid) || (isAdmin && editingBudget) || (isAdmin && editingDonor) || (isAdmin && editingMember) || state.viewingPhotoUrl || state.changingPin;
+      if (typeof document !== 'undefined' && document.body) {
+        if (isAnyModalOpen) {
+          document.body.classList.add('modal-open');
+        } else {
+          document.body.classList.remove('modal-open');
+        }
+      }
+var selectedAid = state.selectedAidId ? state.aids.find(function(a) { return String(a.id).trim() === String(state.selectedAidId).trim(); }) : null;
       var editingAid = state.editingAidId ? state.aids.find(function(a) { return String(a.id).trim() === String(state.editingAidId).trim(); }) : null;
       var editingBudget = state.editingBudgetId ? state.budget.find(function(b) { return String(b.id).trim() === String(state.editingBudgetId).trim(); }) : null;
       var editingDonor = state.editingDonorId ? state.donors.find(function(d) { return String(d.id).trim() === String(state.editingDonorId).trim(); }) : null;
@@ -1464,7 +1500,7 @@
         '</div>' +
       '</header>';
 
-      html += '<main class="flex-1 p-4 overflow-y-auto">';
+      html += '<main class="flex-1 p-4">';
 
       // 1. HANELER SEKMESİ
       if (state.activeTab === 'yardimlar') {
@@ -2421,7 +2457,7 @@
           : '<span class="text-xs text-slate-400 italic">İhtiyaç kalemi seçilmemiş.</span>';
 
         html += '<div class="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-end justify-center">' +
-          '<div class="bg-white w-full max-w-md max-h-[88vh] rounded-t-3xl p-5 overflow-y-auto space-y-3.5 shadow-2xl">' +
+          '<div class="bg-white w-full max-w-md max-h-[88vh] rounded-t-3xl p-5 overflow-y-auto modal-scroll-body space-y-3.5 shadow-2xl">' +
             // ÜST BAŞLIK & DURUM ROZETİ
             '<div class="flex justify-between items-start pb-2 border-b border-slate-100">' +
               '<div>' +
@@ -2516,7 +2552,7 @@
             // MODAL 2: HANE DÜZENLEME PENCERESİ (İl / İlçe / Mahalle 3'lü Düzenleme)
       if (isAdmin && editingAid) {
         html += '<div class="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-end justify-center">' +
-          '<form onsubmit="handleSaveEditAid(event)" class="bg-white w-full max-w-md max-h-[85vh] rounded-t-3xl p-5 overflow-y-auto space-y-3.5 shadow-2xl">' +
+          '<form onsubmit="handleSaveEditAid(event)" class="bg-white w-full max-w-md max-h-[85vh] rounded-t-3xl p-5 overflow-y-auto modal-scroll-body space-y-3.5 shadow-2xl">' +
             '<div class="flex justify-between items-center pb-2 border-b"><h3 class="font-extrabold text-slate-900 text-base font-display">Hane Bilgilerini Düzenle</h3><button type="button" onclick="closeEditAid()" class="w-7 h-7 bg-slate-100 rounded-full font-bold text-slate-500 text-xs">✕</button></div>' +
             '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Hane Adı / Rumuz</label><input id="editAidName" required value="' + esc(editingAid.name) + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:bg-white" /></div>' +
             '<div class="grid grid-cols-3 gap-2">' +
@@ -3558,11 +3594,10 @@
         var label = encodeURIComponent(item.name || 'Hane Konumu');
 
         if (mode === 'nav') {
-          // 🧭 Canlı Navigasyon Başlat (Android Google Maps Uygulamasını Doğrudan Açar)
+          // 🧭 Canlı Navigasyon Başlat
           if (isAndroid) {
-            targetUri = 'intent://maps.google.com/maps?daddr=' + lat + ',' + lon + 
-                        '&dirflg=d#Intent;scheme=https;package=com.google.android.apps.maps;' +
-                        'S.browser_fallback_url=' + encodeURIComponent('google.navigation:q=' + lat + ',' + lon) + ';end';
+            // Android yerel doğrudan navigasyon şeması (Google Play'e asla atmaz)
+            targetUri = 'google.navigation:q=' + lat + ',' + lon + '&mode=d';
           } else if (isIOS) {
             targetUri = 'maps://?daddr=' + lat + ',' + lon + '&dirflg=d';
           } else {
@@ -3571,9 +3606,8 @@
         } else {
           // 🗺️ Harita Üzerinde Pini ve Konumu Göster
           if (isAndroid) {
-            targetUri = 'intent://maps.google.com/maps?q=' + lat + ',' + lon + '(' + label + ')' +
-                        '#Intent;scheme=https;package=com.google.android.apps.maps;' +
-                        'S.browser_fallback_url=' + encodeURIComponent('geo:' + lat + ',' + lon + '?q=' + lat + ',' + lon + '(' + label + ')') + ';end';
+            // Android evrensel RFC 5870 yerel harita şeması (Google Play'e asla atmaz)
+            targetUri = 'geo:' + lat + ',' + lon + '?q=' + lat + ',' + lon + '(' + label + ')';
           } else if (isIOS) {
             targetUri = 'maps://?q=' + label + '&ll=' + lat + ',' + lon;
           } else {
@@ -3586,22 +3620,30 @@
         var query = parts.join(', ') || item.name || 'Kayseri';
         var encodedQuery = encodeURIComponent(query);
 
-        if (isAndroid) {
-          targetUri = 'intent://maps.google.com/maps?q=' + encodedQuery +
-                      '#Intent;scheme=https;package=com.google.android.apps.maps;' +
-                      'S.browser_fallback_url=' + encodeURIComponent('geo:0,0?q=' + encodedQuery) + ';end';
-        } else if (isIOS) {
-          targetUri = 'maps://?q=' + encodedQuery;
+        if (mode === 'nav') {
+          if (isAndroid) {
+            targetUri = 'google.navigation:q=' + encodedQuery + '&mode=d';
+          } else if (isIOS) {
+            targetUri = 'maps://?daddr=' + encodedQuery + '&dirflg=d';
+          } else {
+            targetUri = 'https://www.google.com/maps/dir/?api=1&destination=' + encodedQuery;
+          }
         } else {
-          targetUri = 'https://www.google.com/maps/search/?api=1&query=' + encodedQuery;
+          if (isAndroid) {
+            targetUri = 'geo:0,0?q=' + encodedQuery;
+          } else if (isIOS) {
+            targetUri = 'maps://?q=' + encodedQuery;
+          } else {
+            targetUri = 'https://www.google.com/maps/search/?api=1&query=' + encodedQuery;
+          }
         }
       }
 
       pushNavState('external');
 
-      // 🛡️ KRİTİK: target="_blank" KULLANILMAZ!
-      // WebView'in harita linkini iç tarayıcıda açmasını ve Google Haritalar web sürümünün 
-      // "Tarayıcınızı güncelleyin" hatası vermesini önlemek için doğrudan yerel Android Intent'i tetiklenir.
+      // 🛡️ KRİTİK: package=com.google.android.apps.maps içeren intent:// KULLANILMAZ!
+      // Çünkü WebView veya intent çözümleme başarısız olunca Android doğrudan Google Play Store'a yönlendiriyordu.
+      // geo: ve google.navigation: protokolleri ise cihazdaki harita uygulamasını doğrudan açar.
       try {
         var a = document.createElement('a');
         a.href = targetUri;
@@ -3615,7 +3657,6 @@
       }
     };
 
-    // FOTOĞRAF IŞIK KUTUSU (LIGHTBOX) FONKSİYONLARI
     window.openPhotoModal = function(url) {
       if (!url) return;
       state.viewingPhotoUrl = url;
@@ -3841,8 +3882,9 @@
     // =========================================================================
     // 🔙 GEZİNTİ VE GERİ TUŞU YÖNETİMİ (Android Donanım Geri Tuşu Koruması)
     // =========================================================================
-    var lastBackPressTime = 0;
-
+    // =========================================================================
+    // 🔙 GEZİNTİ VE GERİ TUŞU YÖNETİMİ (Android Donanım Geri Tuşu Koruması)
+    // =========================================================================
     function pushNavState(type) {
       try {
         history.pushState({ hareNav: type, timestamp: Date.now() }, '');
@@ -3851,23 +3893,18 @@
 
     function ensureHistoryBuffer() {
       try {
-        // 🛡️ Android WebView'de canGoBack()'in daima true kalmasını sağlayan emniyet tamponu
-        history.pushState({ hareNav: 'buffer', timestamp: Date.now() }, '');
+        history.pushState({ hareNav: 'guard', timestamp: Date.now() }, '');
       } catch(e) {}
     }
 
     window.addEventListener('popstate', function(event) {
-      // 🛡️ Harici WhatsApp veya telefon araması sonrası geri dönüldüğünde
-      if (event.state && event.state.hareNav === 'external') {
-        ensureHistoryBuffer();
-        return;
-      }
+      // 🛡️ Android WebView'de canGoBack()'in daima true kalmasını sağla (Asla uygulamadan atmasın)
+      ensureHistoryBuffer();
 
       // 0. Onay modalı açıksa kapat
       var confirmModal = document.getElementById('custom-confirm-modal');
       if (confirmModal && confirmModal.style.display !== 'none') {
         closeCustomConfirm();
-        ensureHistoryBuffer();
         return;
       }
 
@@ -3875,7 +3912,6 @@
       if (state.changingPin) {
         state.changingPin = false;
         render();
-        ensureHistoryBuffer();
         return;
       }
 
@@ -3883,15 +3919,13 @@
       if (state.viewingPhotoUrl) {
         state.viewingPhotoUrl = null;
         render();
-        ensureHistoryBuffer();
         return;
       }
 
-      // 3. Hane detay modalı açıksa kapat
+      // 3. Hane detay modalı açıksa kapat ve listeye dön
       if (state.selectedAidId) {
         state.selectedAidId = null;
         render();
-        ensureHistoryBuffer();
         return;
       }
 
@@ -3902,7 +3936,6 @@
         state.editingDonorId = null;
         state.editingMemberId = null;
         render();
-        ensureHistoryBuffer();
         return;
       }
 
@@ -3911,7 +3944,6 @@
         state.viewingDonorDetails = null;
         saveNavState();
         render();
-        ensureHistoryBuffer();
         return;
       }
 
@@ -3920,7 +3952,6 @@
         state.viewingMemberKasa = null;
         saveNavState();
         render();
-        ensureHistoryBuffer();
         return;
       }
 
@@ -3930,12 +3961,10 @@
         state.searchQuery = '';
         saveNavState();
         render();
-        ensureHistoryBuffer();
         return;
       }
 
-      // 8. Başka bir sekmede ise (Hane Ekle 'yeni', Sandık 'kasa', Hayırsever 'bagiscilar', Gönüllü 'ekip')
-      // UYGULAMADAN ASLA ÇIKMA! Haneler ana sayfasına dön
+      // 8. Başka bir sekmede ise ('yeni', 'kasa', 'bagiscilar', 'ekip') -> Haneler ana sayfasına dön
       if (state.activeTab !== 'yardimlar') {
         state.activeTab = 'yardimlar';
         state.viewingStatusList = null;
@@ -3945,37 +3974,19 @@
         saveNavState();
         render();
         showToast('← Haneler ana sayfasına dönüldü.');
-        ensureHistoryBuffer();
         return;
       }
 
-      // 9. ZATEN HANELER ANA SAYFASINDA VE HİÇBİR PENCERE AÇIK DEĞİL
-      // 🚪 2 KERE BASILINCA ÇIKMA MOTORU (Double-Tap Back to Exit)
-      var now = Date.now();
-      if (now - lastBackPressTime < 2200) {
-        // 2 saniye içinde 2. kez basıldı -> Çıkışa izin ver!
-        showToast('Hâre kapatılıyor...');
-        try {
-          window.close();
-        } catch(e) {}
-        try {
-          if (window.history.length > 1) {
-            window.history.go(-(window.history.length));
-          }
-        } catch(e) {}
-      } else {
-        // İlk basış -> Kullanıcıyı uyar ve 2 saniyelik zaman tanı
-        lastBackPressTime = now;
-        showToast('🚪 Çıkmak için 2 saniye içinde tekrar basın');
-        ensureHistoryBuffer();
-      }
+      // 9. Zaten Haneler ana sayfasında ve açık pencere yok -> ASLA UYGULAMADAN ATMA!
+      showToast('ℹ️ Çıkış yapmak için sağ üstteki 🚪 butonunu kullanabilirsiniz.');
     });
 
-    // İlk açılışta geçmiş kökünü ve çok katmanlı güvenlik tamponunu oluştur
+    // İlk açılışta geçmiş tamponunu oluştur (Android canGoBack() her zaman açık kalsın)
     try {
       history.replaceState({ hareNav: 'root' }, '');
-      history.pushState({ hareNav: 'app' }, '');
-      history.pushState({ hareNav: 'buffer' }, '');
+      for (var b = 0; b < 4; b++) {
+        history.pushState({ hareNav: 'guard' }, '');
+      }
     } catch(e) {}
 
     window.setTab = function(tab) {
