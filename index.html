@@ -256,7 +256,7 @@
     // UYGULAMA DURUMU (Veriler oturum açılana kadar BOŞTUR)
     const state = {
       currentUser: null, // Giriş yapılmadan veriler yüklenmez!
-      sheetUrl: DEFAULT_SHEET_URL,
+      sheetUrl: (function() { try { return localStorage.getItem('hare_sheet_url') || DEFAULT_SHEET_URL; } catch(e) { return DEFAULT_SHEET_URL; } })(),
       members: INITIAL_MEMBERS,
       aids: [],
       budget: [],
@@ -440,6 +440,26 @@
       }
     }
 
+    window.saveSheetUrl = async function() {
+      var input = document.getElementById('sheetUrlInput');
+      if (input && input.value.trim()) {
+        var url = input.value.trim();
+        state.sheetUrl = url;
+        try { localStorage.setItem('hare_sheet_url', url); } catch(e) {}
+        showToast('💾 E-Tablo linki kaydedildi, canlı eşitleniyor...');
+        await syncFromGoogleSheet(false);
+      }
+    };
+
+    window.resetSheetUrl = async function() {
+      state.sheetUrl = DEFAULT_SHEET_URL;
+      try { localStorage.removeItem('hare_sheet_url'); } catch(e) {}
+      var input = document.getElementById('sheetUrlInput');
+      if (input) input.value = DEFAULT_SHEET_URL;
+      showToast('🔄 Varsayılan E-Tablo linki geri yüklendi...');
+      await syncFromGoogleSheet(false);
+    };
+
     async function syncFromGoogleSheet(silent) {
       if (!state.currentUser) return;
       var activeEl = document.activeElement;
@@ -452,16 +472,10 @@
       }
 
       try {
-        // 🔒 Önbellek Engelleme (Cache-Busting): Her istekte benzersiz zaman ve rastgele anahtar eklenir
+        // 🔒 Önbellek Engelleme (Cache-Busting): Benzersiz zaman parametresi eklenir
+        // ÖNEMLİ: Özel header (Cache-Control/Pragma) kaldırıldı çünkü Google Apps Script OPTIONS preflight isteklerini desteklemez ve CORS hatası verir!
         var cacheBuster = '&_ts=' + Date.now() + '&_rnd=' + Math.floor(Math.random() * 1000000);
-        const res = await fetch(state.sheetUrl + '?token=' + encodeURIComponent(API_SECRET) + cacheBuster, {
-          method: 'GET',
-          cache: 'no-store',
-          headers: {
-            'Cache-Control': 'no-cache, no-store, max-age=0, must-revalidate',
-            'Pragma': 'no-cache'
-          }
-        });
+        const res = await fetch(state.sheetUrl + '?token=' + encodeURIComponent(API_SECRET) + cacheBuster);
         const data = await res.json();
         if (data && !data.error) {
           // Eğer o sırada kullanıcı bir silme/ekleme gönderiyorsa sunucudaki eski verinin yerel silinenleri geri getirmesini engelle
@@ -2072,6 +2086,17 @@
               '<button type="submit" class="w-full bg-emerald-800 text-white font-extrabold text-xs py-3 rounded-xl font-display shadow-md">Gönüllüyü Ekibe Kaydet</button>' +
             '</form>' +
             '<div class="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-3"><span class="text-xs font-bold text-slate-800 uppercase block font-display">Gönüllü Yetki Kontrolü</span><div class="space-y-2">' + allMembersControlHTML + '</div></div>' +
+            '<div class="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-3">' +
+              '<div class="flex items-center space-x-2.5">' +
+                '<span class="text-xl">🔗</span>' +
+                '<div><h4 class="text-xs font-bold text-slate-800 uppercase font-display">Google E-Tablo Bağlantı Linki (Web App)</h4><p class="text-[10px] text-slate-400">Verilerin senkronize olduğu Apps Script Web App adresi.</p></div>' +
+              '</div>' +
+              '<div><input id="sheetUrlInput" value="' + esc(state.sheetUrl) + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white text-slate-700" placeholder="https://script.google.com/macros/s/.../exec" /></div>' +
+              '<div class="grid grid-cols-2 gap-2">' +
+                '<button type="button" onclick="saveSheetUrl()" class="bg-emerald-800 hover:bg-emerald-900 text-white font-extrabold text-xs py-2.5 rounded-xl shadow active:scale-95 transition-all">💾 Linki Kaydet & Eşitle</button>' +
+                '<button type="button" onclick="resetSheetUrl()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-2.5 rounded-xl border border-slate-200 active:scale-95 transition-all">🔄 Varsayılana Dön</button>' +
+              '</div>' +
+            '</div>' +
             '<div class="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-3.5">' +
               '<div class="flex items-center space-x-2.5">' +
                 '<span class="text-xl">💾</span>' +
