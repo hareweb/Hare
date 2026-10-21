@@ -50,24 +50,26 @@
   </script>
 
   <style>
-    html, body {
+    html {
       min-height: 100%;
       -webkit-tap-highlight-color: transparent;
       font-family: 'Plus Jakarta Sans', sans-serif;
+      overscroll-behavior-y: none;
+    }
+    body {
+      min-height: 100%;
+      -webkit-tap-highlight-color: transparent;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
       overflow-x: hidden;
       overflow-y: auto;
-      overscroll-behavior-y: none !important;
-      overscroll-behavior: none !important;
+      overscroll-behavior-y: none;
       touch-action: pan-y;
       -webkit-overflow-scrolling: touch;
     }
-    body {
-      user-select: none;
-      -webkit-user-select: none;
-    }
     body.modal-open {
       overflow: hidden !important;
-      touch-action: none !important;
     }
     .modal-scroll-body {
       -webkit-overflow-scrolling: touch !important;
@@ -117,7 +119,7 @@
 
 
 
-  <div id="root" class="w-full max-w-md min-h-screen bg-slate-50 flex flex-col shadow-2xl relative pb-48 overflow-x-hidden"></div>
+  <div id="root" class="w-full max-w-md min-h-screen bg-slate-50 flex flex-col shadow-2xl relative pb-48"></div>
   <div id="global-system-bar" class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-[#065f46] border-t border-emerald-800/60 z-[999] pointer-events-none safe-system-bar" title="Sistem Gezinti Çubuğu"></div>
 
   <script>
@@ -5490,31 +5492,10 @@
     };
 
     // =========================================================================
-    // 🚫 AŞAĞI KAYDIRINCA OLUŞAN YENİLEME ÖZELLİĞİNİ (PULL-TO-REFRESH) KESİN ENGELLEME
+    // 🚫 PULL-TO-REFRESH ENGELLEME & AKICI 120Hz KAYDIRMA KORUMASI
+    // Not: Pull-to-refresh CSS düzeyinde (overscroll-behavior-y: none) engellenir.
+    // JavaScript touchmove preventDefault() kullanılmaz; böylece yukarı-aşağı kaydırma asla kilitlenmez.
     // =========================================================================
-    var _pullTouchStartY = 0;
-    function handlePullTouchStart(e) {
-      if (e.touches && e.touches.length === 1) {
-        _pullTouchStartY = e.touches[0].clientY;
-      }
-    }
-    function handlePullTouchMove(e) {
-      if (e.touches && e.touches.length === 1) {
-        var currentY = e.touches[0].clientY;
-        var diffY = currentY - _pullTouchStartY;
-        var scrollPos = window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop || 0;
-        // Sayfa en tepedeyken aşağı çekilirse (Pull-to-refresh) WebView yenilemesini kesinlikle engelle
-        if (scrollPos <= 0 && diffY > 0) {
-          if (e.cancelable) {
-            e.preventDefault();
-          }
-        }
-      }
-    }
-    window.addEventListener("touchstart", handlePullTouchStart, { passive: true });
-    document.addEventListener("touchstart", handlePullTouchStart, { passive: true });
-    window.addEventListener("touchmove", handlePullTouchMove, { passive: false });
-    document.addEventListener("touchmove", handlePullTouchMove, { passive: false });
 
     // =========================================================================
     // 🔙 ANDROİD APK GERİ TUŞU MOTORU: 1 GERİ ANASAYFA, 2 GERİ ÇIKIŞ
