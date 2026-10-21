@@ -90,34 +90,6 @@
     <option value="İzmir">
   </datalist>
 
-  <datalist id="hareDistrictList">
-    <option value="Melikgazi">
-    <option value="Kocasinan">
-    <option value="Talas">
-    <option value="İncesu">
-    <option value="Develi">
-    <option value="Yahyalı">
-    <option value="Bünyan">
-    <option value="Pınarbaşı">
-    <option value="Tomarza">
-    <option value="Yeşilhisar">
-    <option value="Sarıoğlan">
-    <option value="Hacılar">
-    <option value="Sarız">
-    <option value="Akkışla">
-    <option value="Felahiye">
-    <option value="Özvatan">
-    <option value="Adapazarı">
-    <option value="Serdivan">
-    <option value="Erenler">
-    <option value="Onikişubat">
-    <option value="Dulkadiroğlu">
-    <option value="Antakya">
-    <option value="Defne">
-    <option value="Şahinbey">
-    <option value="Şehitkamil">
-  </datalist>
-
   <div id="root" class="w-full max-w-md min-h-screen bg-slate-50 flex flex-col shadow-2xl relative pb-28 overflow-x-hidden"></div>
 
   <script>
@@ -1412,9 +1384,9 @@
             '</div>' +
             '<div class="text-[10px] text-slate-500 font-semibold tracking-wide truncate mt-0.5">' +
               '<strong class="text-emerald-800 font-extrabold">' + esc(state.currentUser.name) + '</strong>' +
-              '<button type="button" onclick="openChangePinModal()" title="Kendi Giriş PIN Kodumu Değiştir" class="inline-flex items-center space-x-0.5 ml-1.5 px-1.5 py-0.5 rounded-md text-[9px] font-bold text-slate-500 hover:text-emerald-800 bg-slate-100 hover:bg-emerald-50 border border-slate-200 active:scale-90 transition-all"><span>🔑</span><span>PIN</span></button>' +
               '<span class="text-slate-300 mx-1">•</span>' +
               '<span>' + (isAdmin ? 'Emanetçi' : 'Gönüllü') + '</span>' +
+              '<button type="button" onclick="openChangePinModal()" title="Kendi Giriş PIN Kodumu Değiştir" class="inline-flex items-center space-x-0.5 ml-1.5 px-1.5 py-0.5 rounded-md text-[9px] font-bold text-slate-500 hover:text-emerald-800 bg-slate-100 hover:bg-emerald-50 border border-slate-200 active:scale-90 transition-all"><span>🔑</span><span>PIN</span></button>' +
             '</div>' +
           '</div>' +
         '</div>' +
@@ -1585,7 +1557,7 @@
           '<div><label class="text-xs font-bold text-slate-500 uppercase">Hane (Aile) Adı</label><input id="newFullName" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm mt-1 font-semibold outline-none focus:ring-2 focus:ring-emerald-600" placeholder="Örn: Ahmet Amca / Yetim Ailesi" /></div>' +
           '<div class="grid grid-cols-3 gap-2">' +
             '<div><label class="text-xs font-bold text-slate-500 uppercase">İl</label><input id="newCity" list="hareCityList" required value="Kayseri" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm mt-1 font-semibold outline-none focus:ring-2 focus:ring-emerald-600" placeholder="İl (Örn: Kayseri)" /></div>' +
-            '<div><label class="text-xs font-bold text-slate-500 uppercase">İlçe</label><input id="newDistrict" list="hareDistrictList" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm mt-1 font-semibold outline-none focus:ring-2 focus:ring-emerald-600" placeholder="İlçe (Örn: Melikgazi)" /></div>' +
+            '<div><label class="text-xs font-bold text-slate-500 uppercase">İlçe</label><input id="newDistrict" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm mt-1 font-semibold outline-none focus:ring-2 focus:ring-emerald-600" placeholder="İlçe" /></div>' +
             '<div><label class="text-xs font-bold text-slate-500 uppercase">Mahalle</label><input id="newNeighborhood" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm mt-1 font-semibold outline-none focus:ring-2 focus:ring-emerald-600" placeholder="Mahalle" /></div>' +
           '</div>' +
           '<div><label class="text-xs font-bold text-slate-500 uppercase">İletişim Numarası</label><input id="newPhone" type="tel" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm mt-1 font-semibold outline-none focus:ring-2 focus:ring-emerald-600" placeholder="05XXXXXXXXX" /></div>' +
@@ -2478,7 +2450,7 @@
             '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Hane Adı / Rumuz</label><input id="editAidName" required value="' + esc(editingAid.name) + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:bg-white" /></div>' +
             '<div class="grid grid-cols-3 gap-2">' +
               '<div><label class="text-[11px] font-bold text-slate-500 uppercase">İl</label><input id="editAidCity" list="hareCityList" required value="' + esc(editingAid.city || '') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
-              '<div><label class="text-[11px] font-bold text-slate-500 uppercase">İlçe</label><input id="editAidDistrict" list="hareDistrictList" required value="' + esc(editingAid.district) + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
+              '<div><label class="text-[11px] font-bold text-slate-500 uppercase">İlçe</label><input id="editAidDistrict" required value="' + esc(editingAid.district) + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" placeholder="İlçe" /></div>' +
               '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Mahalle</label><input id="editAidNeighborhood" required value="' + esc(editingAid.neighborhood) + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
             '</div>' +
             '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Telefon</label><input id="editAidPhone" type="tel" value="' + esc(editingAid.phone || '') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
