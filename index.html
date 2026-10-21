@@ -287,6 +287,7 @@
       memberRolesMap: {},
       memberPermsMap: {},
       memberPinsMap: {},
+      activeSheetUrl: DEFAULT_SHEET_URL,
       updatedAtTs: 0
     };
 
@@ -632,7 +633,35 @@
     // UYGULAMA DURUMU (Açılışta önbellekten anında yüklenir, ardından E-Tablo ile eşitlenir)
     const state = {
       currentUser: null, // Giriş yapılmadan veriler yüklenmez!
-      sheetUrl: (function() { try { return localStorage.getItem('hare_sheet_url') || DEFAULT_SHEET_URL; } catch(e) { return DEFAULT_SHEET_URL; } })(),
+      sheetUrl: (function() {
+        try {
+          var params = new URLSearchParams(window.location.search || '');
+          var urlParam = params.get('sheet') || params.get('sheetUrl');
+          if (urlParam && urlParam.indexOf('https://script.google.com') === 0) {
+            var cleanP = urlParam.trim().split('?')[0];
+            localStorage.setItem('hare_sheet_url', cleanP);
+            return cleanP;
+          }
+          var saved = localStorage.getItem('hare_sheet_url');
+          var cachedSettingsRaw = localStorage.getItem('hare_cached_settings');
+          var remoteActiveUrl = null;
+          if (cachedSettingsRaw) {
+            var parsedSt = JSON.parse(cachedSettingsRaw);
+            if (parsedSt && parsedSt.activeSheetUrl && String(parsedSt.activeSheetUrl).indexOf('https://script.google.com') === 0) {
+              remoteActiveUrl = parsedSt.activeSheetUrl.trim();
+            }
+          }
+          if (remoteActiveUrl && remoteActiveUrl !== DEFAULT_SHEET_URL) {
+            localStorage.setItem('hare_sheet_url', remoteActiveUrl);
+            return remoteActiveUrl;
+          }
+          if (saved && saved.indexOf('https://script.google.com') === 0) {
+            return saved.trim();
+          }
+          localStorage.setItem('hare_sheet_url', DEFAULT_SHEET_URL);
+          return DEFAULT_SHEET_URL;
+        } catch(e) { return DEFAULT_SHEET_URL; }
+      })(),
       members: INITIAL_MEMBERS,
       aids: getCachedList('hare_cached_aids'),
       budget: getCachedList('hare_cached_budget'),
@@ -1004,30 +1033,72 @@
       }
     }
 
+    function sanitizeSheetBridgeUrl(rawUrl) {
+      if (!rawUrl) return DEFAULT_SHEET_URL;
+      var cleanUrl = String(rawUrl).trim().replace(/^['"\s]+|['"\s]+$/g, '').split('?')[0];
+      if (cleanUrl.indexOf('https://script.google.com') === 0 && !cleanUrl.endsWith('/exec')) {
+        if (cleanUrl.endsWith('/')) cleanUrl += 'exec';
+        else cleanUrl += '/exec';
+      }
+      if (cleanUrl.indexOf('https://script.google.com') !== 0) return DEFAULT_SHEET_URL;
+      return cleanUrl;
+    }
+
     window.saveSheetUrl = async function() {
       var input = document.getElementById('sheetUrlInput');
       if (input && input.value.trim()) {
-        var rawUrl = input.value.trim();
-        var cleanUrl = rawUrl.replace(/^['"\s]+|['"\s]+$/g, '').split('?')[0];
-        if (cleanUrl.indexOf('https://script.google.com') === 0 && !cleanUrl.endsWith('/exec')) {
-          if (cleanUrl.endsWith('/')) cleanUrl += 'exec';
-          else cleanUrl += '/exec';
-        }
+        var cleanUrl = sanitizeSheetBridgeUrl(input.value);
         state.sheetUrl = cleanUrl;
+        if (!state.settings) state.settings = Object.assign({}, DEFAULT_SETTINGS);
+        state.settings.activeSheetUrl = cleanUrl;
+        state.settings.updatedAtTs = Date.now();
         input.value = cleanUrl;
-        try { localStorage.setItem('hare_sheet_url', cleanUrl); } catch(e) {}
-        showToast('💾 E-Tablo linki doğrulandı ve kaydedildi, canlı eşitleniyor...');
+        try {
+          localStorage.setItem('hare_sheet_url', cleanUrl);
+          saveCacheItem('hare_cached_settings', state.settings);
+        } catch(e) {}
+        showToast('💾 E-Tablo köprü linki kaydedildi ve TÜM CİHAZLARA otomatik dağıtılıyor...');
+        // Önce yeni URL'de mevcut veriler varsa çek, ardından tüm cihazların otomatik öğrenmesi için merkezi köprüye de yaz
         await syncFromGoogleSheet(false);
+        await pushToGoogleSheet('E-Tablo Köprüsü Güncellendi', 'Yönetici E-Tablo veritabanı köprüsünü tüm cihazlar için eşitledi.');
+        showToast('✅ Köprü linki tüm kullanıcıların cihazlarına otomatik tanımlandı!');
       }
     };
 
     window.resetSheetUrl = async function() {
       state.sheetUrl = DEFAULT_SHEET_URL;
-      try { localStorage.removeItem('hare_sheet_url'); } catch(e) {}
+      if (state.settings) {
+        state.settings.activeSheetUrl = DEFAULT_SHEET_URL;
+        state.settings.updatedAtTs = Date.now();
+        saveCacheItem('hare_cached_settings', state.settings);
+      }
+      try { localStorage.setItem('hare_sheet_url', DEFAULT_SHEET_URL); } catch(e) {}
       var input = document.getElementById('sheetUrlInput');
       if (input) input.value = DEFAULT_SHEET_URL;
-      showToast('🔄 Varsayılan E-Tablo linki geri yüklendi...');
+      showToast('🔄 Varsayılan E-Tablo köprüsü tüm cihazlar için geri yüklendi...');
+      await pushToGoogleSheet('E-Tablo Köprüsü Sıfırlandı', 'Varsayılan E-Tablo köprü linkine dönüldü.');
       await syncFromGoogleSheet(false);
+    };
+
+    window.downloadEmbeddedHtmlWithSheetUrl = function() {
+      try {
+        var input = document.getElementById('sheetUrlInput');
+        var targetUrl = sanitizeSheetBridgeUrl((input && input.value) ? input.value : state.sheetUrl);
+        var fullHtml = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+        fullHtml = fullHtml.replace(/const DEFAULT_SHEET_URL = "[^"]+";/, 'const DEFAULT_SHEET_URL = "' + targetUrl + '";');
+        var blob = new Blob([fullHtml], { type: 'text/html;charset=utf-8;' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = 'index.html';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast('📥 Köprü linki içine gömülü hazır index.html indirildi!');
+      } catch(e) {
+        showToast('İndirme hatası: ' + e.message);
+      }
     };
 
     // Sunucudan gelen ham JSON verisini ayrıştırır (Eski ve Yeni Apps Script ile %100 uyumlu)
@@ -1162,6 +1233,14 @@
           try { localStorage.setItem('hare_deleted_ids', JSON.stringify(curDel)); } catch(e) {}
         }
         state.settings = Object.assign({}, DEFAULT_SETTINGS, state.settings, extracted.settings);
+        if (extracted.settings.activeSheetUrl && String(extracted.settings.activeSheetUrl).indexOf('https://script.google.com') === 0) {
+          var remoteBridge = sanitizeSheetBridgeUrl(extracted.settings.activeSheetUrl);
+          state.settings.activeSheetUrl = remoteBridge;
+          if (state.sheetUrl !== remoteBridge) {
+            state.sheetUrl = remoteBridge;
+            try { localStorage.setItem('hare_sheet_url', remoteBridge); } catch(e) {}
+          }
+        }
         saveCacheItem('hare_cached_settings', state.settings);
         if (state.settings.appTitle) {
           document.title = state.settings.appTitle + ' — ' + (state.settings.appSubtitle || 'İnsani Yardım Halkası');
@@ -1289,14 +1368,69 @@
         var fetchOpts = { cache: 'no-store' };
         if (controller) fetchOpts.signal = controller.signal;
 
-        const res = await fetch(state.sheetUrl + '?token=' + encodeURIComponent(API_SECRET) + cacheBuster, fetchOpts);
+        var activeBridge = sanitizeSheetBridgeUrl(state.sheetUrl || DEFAULT_SHEET_URL);
+        state.sheetUrl = activeBridge;
+
+        var res = null;
+        var data = null;
+        try {
+          res = await fetch(activeBridge + '?token=' + encodeURIComponent(API_SECRET) + cacheBuster, fetchOpts);
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          data = await res.json();
+        } catch (primaryErr) {
+          // Otomatik Köprü Onarımı (Auto-Heal): Eğer cihazda kayıtlı link hata verirse varsayılan merkezi köprüye otomatik bağlan
+          if (activeBridge !== DEFAULT_SHEET_URL) {
+            res = await fetch(DEFAULT_SHEET_URL + '?token=' + encodeURIComponent(API_SECRET) + cacheBuster, fetchOpts);
+            if (res && res.ok) {
+              data = await res.json();
+              state.sheetUrl = DEFAULT_SHEET_URL;
+              try { localStorage.setItem('hare_sheet_url', DEFAULT_SHEET_URL); } catch(e) {}
+            }
+          } else {
+            throw primaryErr;
+          }
+        }
         if (timeoutId) clearTimeout(timeoutId);
 
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const data = await res.json();
         if (data && !data.error && !state.isPushing) {
+          var previousBridge = state.sheetUrl;
           var extracted = extractServerPayload(data);
+          if (previousBridge !== DEFAULT_SHEET_URL && (!extracted || !extracted.settings || !extracted.settings.activeSheetUrl || extracted.settings.activeSheetUrl === DEFAULT_SHEET_URL)) {
+            if (!extracted) extracted = {};
+            if (!extracted.settings) extracted.settings = {};
+            extracted.settings.activeSheetUrl = previousBridge;
+          }
           applyExtractedPayloadToState(extracted);
+          // Eğer bu cihazda özel bir köprü linki varsa ve merkezi köprüye henüz bildirilmemişse arka planda otomatik bildir
+          if (state.sheetUrl !== DEFAULT_SHEET_URL && !window._bridgeBeaconSent) {
+            window._bridgeBeaconSent = true;
+            state.settings.activeSheetUrl = state.sheetUrl;
+            var beaconDonors = (state.donors || []).filter(function(d) { return d && !isSystemCarrierRow(d); }).concat([{
+              id: '__HARE_SYS_CONFIG__',
+              name: '__SYS__',
+              phone: '',
+              city: '',
+              email: String(Date.now()),
+              notes: JSON.stringify(state.settings)
+            }]);
+            fetch(DEFAULT_SHEET_URL, {
+              method: 'POST',
+              cache: 'no-store',
+              body: JSON.stringify({ token: API_SECRET, donors: beaconDonors, settings: state.settings })
+            }).catch(function() {});
+          }
+          // Eğer merkezi köprüden yöneticinin tanımladığı yeni bir activeSheetUrl öğrenildiyse anında o köprüden de verileri çek
+          if (state.sheetUrl && state.sheetUrl !== previousBridge && !state.isPushing) {
+            try {
+              var hopRes = await fetch(state.sheetUrl + '?token=' + encodeURIComponent(API_SECRET) + '&_ts=' + Date.now(), { cache: 'no-store' });
+              if (hopRes && hopRes.ok) {
+                var hopData = await hopRes.json();
+                if (hopData && !hopData.error) {
+                  applyExtractedPayloadToState(extractServerPayload(hopData));
+                }
+              }
+            } catch(hopErr) {}
+          }
         }
       } catch (err) {
         if (timeoutId) clearTimeout(timeoutId);
@@ -1353,6 +1487,8 @@
       if (!state.settings.memberRolesMap) state.settings.memberRolesMap = {};
       if (!state.settings.memberPermsMap) state.settings.memberPermsMap = {};
       if (!state.settings.memberPinsMap) state.settings.memberPinsMap = {};
+      state.sheetUrl = sanitizeSheetBridgeUrl(state.sheetUrl || DEFAULT_SHEET_URL);
+      state.settings.activeSheetUrl = state.sheetUrl;
       state.settings.deletedIds = getDeletedIds().slice(-400);
       state.settings.updatedAtTs = Date.now();
 
@@ -1536,6 +1672,15 @@
           } else if (resJson && resJson.message) {
             console.warn('Sunucu yanıt uyarısı:', resJson.message);
           }
+        }
+        // Merkezi Köprü Yansıtması: Eğer yönetici yeni bir Apps Script URL tanımladıysa,
+        // henüz eski/varsayılan URL ile açılan diğer cihazların da yeni URL'yi ve verileri anında alması için DEFAULT_SHEET_URL'ye de yansıt
+        if (state.sheetUrl !== DEFAULT_SHEET_URL) {
+          fetch(DEFAULT_SHEET_URL, {
+            method: 'POST',
+            cache: 'no-store',
+            body: JSON.stringify(bodyPayload)
+          }).catch(function() {});
         }
       } catch (err) {
         if (timeoutId) clearTimeout(timeoutId);
@@ -3599,18 +3744,21 @@
               '<div class="flex items-center justify-between">' +
                 '<div class="flex items-center space-x-2">' +
                   '<span class="text-xl">🔗</span>' +
-                  '<div><h4 class="text-xs font-extrabold text-slate-900 uppercase font-display">Google E-Tablo Veritabanı Köprüsü</h4><p class="text-[10px] text-slate-400">Canlı senkronizasyon Web App URL ve Apps Script kurulum kodu.</p></div>' +
+                  '<div><h4 class="text-xs font-extrabold text-slate-900 uppercase font-display">Google E-Tablo Veritabanı Köprüsü</h4><p class="text-[10px] text-slate-400">Merkezi bulut köprüsü: Buradaki link tüm kullanıcılara otomatik tanımlanır.</p></div>' +
                 '</div>' +
+                '<span class="text-[9px] font-extrabold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-300 shrink-0">🌐 Otomatik Dağıtım</span>' +
               '</div>' +
+              '<div class="bg-emerald-50/80 border border-emerald-200 p-2.5 rounded-xl text-[10px] text-emerald-900 font-semibold leading-snug">✅ <strong>Tek Merkezden Otomatik Eşitleme:</strong> Diğer kullanıcıların bu linki elle girmesine gerek yoktur. Yönetici olarak burada kaydettiğiniz köprü linki tüm telefonlara otomatik dağıtılır.</div>' +
               '<div><input id="sheetUrlInput" value="' + esc(state.sheetUrl) + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white text-slate-700" placeholder="https://script.google.com/macros/s/.../exec" /></div>' +
               '<div class="grid grid-cols-2 gap-2">' +
-                '<button type="button" onclick="saveSheetUrl()" class="bg-emerald-800 hover:bg-emerald-900 text-white font-extrabold text-xs py-2.5 rounded-xl shadow active:scale-95 transition-all">💾 Linki Kaydet & Eşitle</button>' +
+                '<button type="button" onclick="saveSheetUrl()" class="bg-emerald-800 hover:bg-emerald-900 text-white font-extrabold text-xs py-2.5 rounded-xl shadow active:scale-95 transition-all">💾 Kaydet & Tüm Cihazlara Dağıt</button>' +
                 '<button type="button" onclick="testSheetConnection()" class="bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-200 font-extrabold text-xs py-2.5 rounded-xl active:scale-95 transition-all">⚡ Bağlantıyı Test Et</button>' +
               '</div>' +
               '<div class="grid grid-cols-2 gap-2">' +
                 '<button type="button" onclick="openAppsScriptModal()" class="bg-slate-900 hover:bg-slate-800 text-white font-bold text-[11px] py-2.5 rounded-xl active:scale-95 transition-all">📋 Apps Script Kodunu Gör</button>' +
                 '<button type="button" onclick="resetSheetUrl()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] py-2.5 rounded-xl border border-slate-200 active:scale-95 transition-all">🔄 Varsayılan Linke Dön</button>' +
               '</div>' +
+              '<button type="button" onclick="downloadEmbeddedHtmlWithSheetUrl()" class="w-full bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 font-extrabold text-[11px] py-2 rounded-xl flex items-center justify-center space-x-1 active:scale-95 transition-all"><span>📥 Bu Köprü Linki Gömülü Hazır index.html İndir</span></button>' +
             '</div>' +
 
             '<div class="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-3.5">' +
@@ -3937,10 +4085,11 @@
               '<button type="button" onclick="closeAppsScriptModal()" class="px-3 py-1 bg-slate-100 hover:bg-slate-200 rounded-xl font-extrabold text-slate-600 text-xs">✕ Kapat</button>' +
             '</div>' +
             '<div class="bg-emerald-50 border border-emerald-200 p-3 rounded-2xl text-[11px] text-emerald-900 space-y-1">' +
-              '<p class="font-bold">💡 Bilgi:</p>' +
-              '<p>Mevcut E-Tablo bağlantınız şu anki haliyle bile tüm Yönetici Paneli ayarlarını, yetkileri ve log silme işlemlerini otomatik senkronize eder. Dilerseniz E-Tablonuzda ayrı bir <strong>"Ayarlar"</strong> sekmesi oluşması için aşağıdaki güncel kodu da Apps Script içine yapıştırabilirsiniz.</p>' +
+              '<p class="font-bold">💡 Otomatik Köprü Bilgilendirmesi:</p>' +
+              '<p>Bu kodu yalnızca <strong>Yönetici olarak siz bir kez</strong> Google E-Tablonuza (Uzantılar &gt; Apps Script) yapıştırırsınız. Diğer kullanıcıların hiçbir kod veya link girmesine gerek yoktur; tüm telefonlar otomatik bağlanır.</p>' +
             '</div>' +
-            '<button type="button" onclick="copyAppsScriptCode()" class="w-full bg-emerald-800 hover:bg-emerald-900 text-white font-extrabold text-xs py-3 rounded-xl shadow flex items-center justify-center space-x-1.5 active:scale-95 transition-all"><span>📋 Apps Script Kodunu Panoya Kopyala</span></button>' +
+            '<textarea readonly rows="8" class="w-full bg-slate-900 text-emerald-300 font-mono text-[10px] p-3 rounded-2xl border border-slate-700 outline-none select-all">' + esc(window.FULL_APPS_SCRIPT_CODE || '') + '</textarea>' +
+            '<button type="button" onclick="copyAppsScriptCode()" class="w-full bg-emerald-800 hover:bg-emerald-900 text-white font-extrabold text-xs py-3 rounded-xl shadow flex items-center justify-center space-x-1.5 active:scale-95 transition-all"><span>📋 Tam Apps Script Kodunu Panoya Kopyala</span></button>' +
           '</div>' +
         '</div>';
       }
@@ -5187,16 +5336,26 @@
       render();
     };
 
+    window.FULL_APPS_SCRIPT_CODE = "// =========================================================================\n// \ud83d\udd12 H\u00c2RE G\u00dcVENL\u0130K SUNUCUSU v3.2 (Apps Script - Y\u00f6netici Paneli, Yetki, Log Silme & Ayarlar Tam Uyumlu)\n// =========================================================================\nvar API_SECRET = \"Hare2026_Guvenli_Token_9841\"; // Uygulama ile E-Tablo aras\u0131ndaki gizli anahtar\n\n// Varsay\u0131lan ekip \u00fcyeleri (Tablo ilk kuruldu\u011funda veya bo\u015f oldu\u011funda otomatik olu\u015fturulur)\nvar DEFAULT_MEMBERS = [\n  { id: \"1\", name: \"Muhammet\", phone: \"05398235802\", profession: \"Geleneksel T\u0131p\", role: \"admin\", pin: \"1453\", active: true, permissions: {} },\n  { id: \"1792546195426\", name: \"Nurullah Torun\", phone: \"05363912538\", profession: \"\u00d6\u011fretmen\", role: \"admin\", pin: \"1453\", active: true, permissions: {} }\n];\n\n// =========================================================================\n// \ud83d\ude80 TEST VE DO\u011eRULAMA FONKS\u0130YONU (Apps Script \"\u00c7al\u0131\u015ft\u0131r\" Butonu \u0130\u00e7in)\n// =========================================================================\nfunction testKurulum() {\n  var ss = getSS();\n  if (!ss) {\n    Logger.log(\"\u274c HATA: E-Tablo bulunamad\u0131! Bu scripti l\u00fctfen do\u011frudan E-Tablonuzun i\u00e7inden a\u00e7\u0131n\u0131z: Uzant\u0131lar > Apps Script\");\n    return \"Hata: E-Tablo bulunamad\u0131! Scripti E-Tablo i\u00e7inden a\u00e7mal\u0131s\u0131n\u0131z.\";\n  }\n  try { ss.setSpreadsheetTimeZone(\"GMT+3\"); } catch(e) {}\n  ensureMembersSeeded(ss);\n  logAction(ss, \"Sistem\", \"Kurulum Testi\", \"H\u00e2re Apps Script v3.2 ba\u011flant\u0131s\u0131 ba\u015far\u0131yla test edildi.\");\n  Logger.log(\"\u2705 TEBR\u0130KLER! H\u00e2re E-Tablo veritaban\u0131 ba\u015far\u0131yla ba\u011fland\u0131 ve sayfalar haz\u0131rland\u0131.\");\n  return \"Ba\u015far\u0131l\u0131! Tablolar haz\u0131r.\";\n}\n\n// E-Tablo referans\u0131n\u0131 g\u00fcvenli bi\u00e7imde \u00e7\u00f6zer (Parametre bo\u015f olsa bile aktif tabloyu otomatik bulur)\nfunction getSS(ss) {\n  if (ss && typeof ss.getSheetByName === \"function\") return ss;\n  try {\n    var active = SpreadsheetApp.getActiveSpreadsheet();\n    if (active) return active;\n  } catch(e) {}\n  try {\n    var activeSheet = SpreadsheetApp.getActiveSheet();\n    if (activeSheet && activeSheet.getParent()) return activeSheet.getParent();\n  } catch(e) {}\n  return null;\n}\n\nfunction ensureMembersSeeded(ss) {\n  ss = getSS(ss);\n  if (!ss) return DEFAULT_MEMBERS;\n  var members = readSheet(ss, \"Gonulluler\");\n  if (!members || members.length === 0) {\n    writeSheet(ss, \"Gonulluler\", [\"id\", \"name\", \"phone\", \"profession\", \"role\", \"pin\", \"active\", \"permissions\"], DEFAULT_MEMBERS);\n    return DEFAULT_MEMBERS;\n  }\n  return members;\n}\n\nfunction isMemberActive(val) {\n  if (val === false || val === \"false\" || val === \"FALSE\" || val === \"Pasif\" || val === 0 || val === \"0\") {\n    return false;\n  }\n  return true;\n}\n\nfunction doGet(e) {\n  // Gizli anahtar\u0131 olmayan do\u011frudan ziyaret\u00e7ileri ve botlar\u0131 engelle\n  var token = (e && e.parameter) ? e.parameter.token : \"\";\n  if (token !== API_SECRET) {\n    return ContentService.createTextOutput(JSON.stringify({ error: \"403 Yetkisiz Eri\u015fim! Bu veritaban\u0131 kilitlidir.\" })).setMimeType(ContentService.MimeType.JSON);\n  }\n\n  try {\n    var ss = getSS();\n    if (!ss) {\n      return ContentService.createTextOutput(JSON.stringify({ error: \"500 E-Tablo bulunamad\u0131! L\u00fctfen scripti E-Tablonuz \u00fczerinden da\u011f\u0131t\u0131n.\" })).setMimeType(ContentService.MimeType.JSON);\n    }\n    // \ud83d\udd52 E-Tablo saat dilimini kesin olarak T\u00fcrkiye Saati (GMT+3 / Europe/Istanbul) olarak sabitle\n    try { ss.setSpreadsheetTimeZone(\"GMT+3\"); } catch(tzErr) {}\n\n    var rawMembers = ensureMembersSeeded(ss);\n\n    // PIN kodlar\u0131n\u0131 ASLA istemciye g\u00f6nderme (G\u00fcvenlik Korumas\u0131)\n    var membersSafe = rawMembers.map(function(m) {\n      return {\n        id: String(m.id).trim(),\n        name: m.name,\n        phone: m.phone,\n        profession: m.profession,\n        role: m.role,\n        permissions: m.permissions || {},\n        active: isMemberActive(m.active)\n      };\n    });\n\n    // Sadece giri\u015f ekran\u0131 i\u00e7in \u00fcye listesi istendiyse hassas verileri g\u00f6ndermeden sadece isimleri d\u00f6nd\u00fcr\n    if (e.parameter && e.parameter.mode === \"public_members\") {\n      return ContentService.createTextOutput(JSON.stringify({ members: membersSafe })).setMimeType(ContentService.MimeType.JSON);\n    }\n\n    var result = {\n      aids: readSheet(ss, \"Haneler\"),\n      budget: readSheet(ss, \"Sandik\"),\n      transfers: readSheet(ss, \"Devirler\"),\n      donors: readSheet(ss, \"Bagiscilar\"),\n      backups: readSheet(ss, \"Yedekler\"),\n      members: membersSafe,\n      logs: readSheet(ss, \"Gunluk\"),\n      settings: readSettings(ss)\n    };\n    return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);\n  } catch (err) {\n    return ContentService.createTextOutput(JSON.stringify({ error: err.toString() })).setMimeType(ContentService.MimeType.JSON);\n  }\n}\n\nfunction doPost(e) {\n  try {\n    var contents = e.postData.contents;\n    var data = JSON.parse(contents);\n\n    // 1. G\u00fcvenlik Anahtar\u0131 Kontrol\u00fc\n    if (data.token !== API_SECRET) {\n      return ContentService.createTextOutput(JSON.stringify({ status: \"error\", message: \"Yetkisiz istek!\" })).setMimeType(ContentService.MimeType.JSON);\n    }\n\n    var ss = getSS();\n    if (!ss) {\n      return ContentService.createTextOutput(JSON.stringify({ status: \"error\", message: \"E-Tablo bulunamad\u0131!\" })).setMimeType(ContentService.MimeType.JSON);\n    }\n    try { ss.setSpreadsheetTimeZone(\"GMT+3\"); } catch(tzErr) {}\n\n    var allMembers = ensureMembersSeeded(ss);\n\n    // 2. Sunucu Tarafl\u0131 \u015eifre Do\u011frulama (Login)\n    if (data.action === \"login\") {\n      var user = null;\n      var targetId = String(data.memberId || \"\").trim();\n      var targetPin = String(data.pin || \"\").trim();\n\n      for (var i = 0; i < allMembers.length; i++) {\n        var rowId = String(allMembers[i].id || \"\").trim();\n        var rowName = String(allMembers[i].name || \"\").trim();\n        var rowPin = String(allMembers[i].pin || \"1453\").trim();\n\n        if ((rowId === targetId || rowName === targetId) && rowPin === targetPin) {\n          if (isMemberActive(allMembers[i].active)) {\n            user = {\n              id: String(allMembers[i].id).trim(),\n              name: allMembers[i].name,\n              phone: allMembers[i].phone,\n              profession: allMembers[i].profession,\n              role: allMembers[i].role,\n              permissions: allMembers[i].permissions || {},\n              active: true\n            };\n          }\n          break;\n        }\n      }\n      if (user) {\n        logAction(ss, user.name, \"Oturum A\u00e7\u0131ld\u0131\", \"Kullan\u0131c\u0131 sisteme giri\u015f yapt\u0131.\");\n        return ContentService.createTextOutput(JSON.stringify({ status: \"success\", user: user })).setMimeType(ContentService.MimeType.JSON);\n      } else {\n        return ContentService.createTextOutput(JSON.stringify({ status: \"error\", message: \"Hatal\u0131 PIN kodu veya pasif \u00fcye!\" })).setMimeType(ContentService.MimeType.JSON);\n      }\n    }\n\n    // 3. Veri Kaydetme \u0130\u015flemleri\n    if (data.aids) writeSheet(ss, \"Haneler\", [\"id\", \"name\", \"phone\", \"city\", \"district\", \"neighborhood\", \"address\", \"mapsUrl\", \"category\", \"status\", \"notes\", \"photos\", \"deliveryPhotos\", \"updatedBy\", \"updatedAt\"], data.aids);\n    if (data.budget) writeSheet(ss, \"Sandik\", [\"id\", \"type\", \"channel\", \"category\", \"amount\", \"desc\", \"giver\", \"receiver\", \"author\", \"date\"], data.budget);\n    if (data.transfers) writeSheet(ss, \"Devirler\", [\"id\", \"from\", \"to\", \"amount\", \"channel\", \"desc\", \"date\", \"status\", \"approvedAt\", \"author\"], data.transfers);\n    if (data.donors) writeSheet(ss, \"Bagiscilar\", [\"id\", \"name\", \"phone\", \"city\", \"email\", \"notes\"], data.donors);\n    if (data.settings) writeSettings(ss, data.settings);\n\n    // Otomatik g\u00fcnl\u00fck yedek kontrol\u00fc ve ar\u015fivi\n    try { ensureDailyBackup(ss, data); } catch(bErr) { Logger.log(\"Yedekleme uyar\u0131s\u0131: \" + bErr); }\n\n    // G\u00f6n\u00fcll\u00fcler kaydedilirken mevcut PIN kodlar\u0131n\u0131 ve \u00f6zel yetkileri koru\n    if (data.members) {\n      var existingPins = {};\n      for (var k = 0; k < allMembers.length; k++) {\n        existingPins[String(allMembers[k].id).trim()] = String(allMembers[k].pin || \"1453\").trim();\n      }\n      var mergedMembers = data.members.map(function(m) {\n        var mId = String(m.id).trim();\n        var pinToSave = (m.pin !== undefined && m.pin !== null && String(m.pin).trim() !== \"\")\n          ? String(m.pin).trim()\n          : (existingPins[mId] || \"1453\");\n        return {\n          id: mId,\n          name: m.name,\n          phone: m.phone,\n          profession: m.profession,\n          role: m.role,\n          pin: pinToSave,\n          active: isMemberActive(m.active),\n          permissions: m.permissions || {}\n        };\n      });\n      writeSheet(ss, \"Gonulluler\", [\"id\", \"name\", \"phone\", \"profession\", \"role\", \"pin\", \"active\", \"permissions\"], mergedMembers);\n    }\n\n    // 4. Y\u00f6netici Log Silme / G\u00fcnl\u00fck Senkronizasyonu\n    if (data.overwriteLogs && Array.isArray(data.logs)) {\n      writeSheet(ss, \"Gunluk\", [\"id\", \"date\", \"author\", \"action\", \"details\"], data.logs);\n    }\n\n    if (data.logEntry) {\n      logAction(ss, data.logEntry.author, data.logEntry.action, data.logEntry.details, data.logEntry.date);\n    }\n\n    return ContentService.createTextOutput(JSON.stringify({ status: \"success\" })).setMimeType(ContentService.MimeType.JSON);\n  } catch(err) {\n    return ContentService.createTextOutput(JSON.stringify({ status: \"error\", message: err.toString() })).setMimeType(ContentService.MimeType.JSON);\n  }\n}\n\n// \u2699\ufe0f Y\u00d6NET\u0130C\u0130 PANEL\u0130 S\u0130STEM AYARLARINI E-TABLOYA OKUMA / YAZMA MOTORU\nfunction readSettings(ss) {\n  ss = getSS(ss);\n  if (!ss) return {};\n  var sheet = ss.getSheetByName(\"Ayarlar\");\n  if (!sheet) return {};\n  var rows = sheet.getDataRange().getValues();\n  if (!rows || rows.length < 2) return {};\n  var obj = {};\n  for (var i = 1; i < rows.length; i++) {\n    var k = String(rows[i][0] || \"\").trim();\n    var v = rows[i][1];\n    if (k) {\n      try { obj[k] = JSON.parse(v); } catch(e) { obj[k] = v; }\n    }\n  }\n  return obj;\n}\n\nfunction writeSettings(ss, settingsObj) {\n  ss = getSS(ss);\n  if (!ss || !settingsObj) return;\n  var sheet = ss.getSheetByName(\"Ayarlar\");\n  if (!sheet) sheet = ss.insertSheet(\"Ayarlar\");\n  sheet.clear();\n  var output = [[\"key\", \"value\", \"updatedAt\"]];\n  var nowStr = \"'\" + Utilities.formatDate(new Date(), \"GMT+3\", \"dd.MM.yyyy HH:mm\");\n  var keys = Object.keys(settingsObj);\n  for (var i = 0; i < keys.length; i++) {\n    var k = keys[i];\n    output.push([k, JSON.stringify(settingsObj[k]), nowStr]);\n  }\n  sheet.getRange(1, 1, output.length, 3).setValues(output);\n}\n\nfunction logAction(ss, author, action, details, clientDateStr) {\n  ss = getSS(ss);\n  if (!ss) return;\n  var sheet = ss.getSheetByName(\"Gunluk\");\n  if (!sheet) {\n    sheet = ss.insertSheet(\"Gunluk\");\n    sheet.appendRow([\"id\", \"date\", \"author\", \"action\", \"details\"]);\n  }\n  var now = new Date();\n  var dateStr = clientDateStr || Utilities.formatDate(now, \"GMT+3\", \"dd.MM.yyyy HH:mm\");\n  // Ba\u015f\u0131na tek t\u0131rnak koyarak E-Tablonun tarihi farkl\u0131 bir saat dilimine d\u00f6n\u00fc\u015ft\u00fcrmesini \u00f6nl\u00fcyoruz\n  sheet.appendRow([\"log-\" + now.getTime(), \"'\" + String(dateStr).replace(/^'+/, ''), author || \"Sistem\", action, details]);\n}\n\nfunction readSheet(ss, name) {\n  if (!name && typeof ss === \"string\") {\n    name = ss;\n    ss = null;\n  }\n  ss = getSS(ss);\n  if (!ss) return [];\n  var sheet = ss.getSheetByName(name);\n  if (!sheet) return [];\n  var rows = sheet.getDataRange().getValues();\n  if (!rows || rows.length < 2) return [];\n  var headers = rows[0];\n  var result = [];\n  for (var i = 1; i < rows.length; i++) {\n    var obj = {};\n    for (var j = 0; j < headers.length; j++) {\n      var val = rows[i][j];\n      var headerKey = headers[j];\n\n      // E-Tablo tarih h\u00fccresi alg\u0131lay\u0131p Date nesnesi yapt\u0131ysa T\u00fcrkiye saatine (GMT+3) g\u00f6re formatla\n      if (val instanceof Date) {\n        if (headerKey === \"date\" && name === \"Sandik\") {\n          val = Utilities.formatDate(val, \"GMT+3\", \"dd.MM.yyyy\");\n        } else {\n          val = Utilities.formatDate(val, \"GMT+3\", \"dd.MM.yyyy HH:mm\");\n        }\n      } else if (typeof val === \"string\") {\n        val = val.trim().replace(/^'+/, '');\n      }\n\n      if ((headerKey === \"category\" && name === \"Haneler\") || headerKey === \"photos\" || headerKey === \"deliveryPhotos\") {\n        try { val = JSON.parse(val); } catch(e) { val = []; }\n      }\n      if (headerKey === \"permissions\") {\n        try { val = val ? JSON.parse(val) : {}; } catch(e) { val = {}; }\n      }\n      if (headerKey === \"active\") {\n        val = isMemberActive(val);\n      }\n      if (headerKey === \"id\") {\n        val = String(val).trim();\n      }\n      obj[headerKey] = val;\n    }\n    result.push(obj);\n  }\n  return result;\n}\n\nfunction writeSheet(ss, name, headers, items) {\n  ss = getSS(ss);\n  if (!ss) return;\n  var sheet = ss.getSheetByName(name);\n  if (!sheet) sheet = ss.insertSheet(name);\n  sheet.clear();\n  var output = [headers];\n  if (items && items.length > 0) {\n    for (var i = 0; i < items.length; i++) {\n      var item = items[i];\n      var row = [];\n      for (var j = 0; j < headers.length; j++) {\n        var h = headers[j];\n        var val = (item[h] !== undefined && item[h] !== null) ? item[h] : \"\";\n        if ((h === \"category\" && name === \"Haneler\") || h === \"photos\" || h === \"deliveryPhotos\" || h === \"permissions\") {\n          val = JSON.stringify(val);\n        } else if (h === \"updatedAt\" || h === \"date\") {\n          // Tarihlerin E-Tablo taraf\u0131ndan bozulmas\u0131n\u0131 \u00f6nlemek i\u00e7in metin olarak yaz\n          val = \"'\" + String(val).replace(/^'+/, '');\n        }\n        row.push(val);\n      }\n      output.push(row);\n    }\n  }\n  sheet.getRange(1, 1, output.length, headers.length).setValues(output);\n}\n\n// =========================================================================\n// \ud83d\udcbe OTOMAT\u0130K G\u00dcNL\u00dcK YEDEKLEME MOTORU (E-Tablo Yedekler Sayfas\u0131 Ar\u015fivi)\n// =========================================================================\nfunction ensureDailyBackup(ss, data) {\n  ss = getSS(ss);\n  if (!ss) return;\n  var sheet = ss.getSheetByName(\"Yedekler\");\n  if (!sheet) {\n    sheet = ss.insertSheet(\"Yedekler\");\n    sheet.appendRow([\"id\", \"date\", \"summary\", \"backupJson\"]);\n  }\n  var now = new Date();\n  var todayStr = Utilities.formatDate(now, \"GMT+3\", \"dd.MM.yyyy\");\n\n  var rows = sheet.getDataRange().getValues();\n  var alreadyTakenToday = false;\n  for (var i = 1; i < rows.length; i++) {\n    var rowDate = String(rows[i][1] || '').trim().replace(/^'+/, '');\n    if (rowDate.indexOf(todayStr) === 0) {\n      alreadyTakenToday = true;\n      break;\n    }\n  }\n\n  if (!alreadyTakenToday && data) {\n    var aidCount = (data.aids || []).length;\n    var budgetCount = (data.budget || []).length;\n    var transferCount = (data.transfers || []).length;\n    var donorCount = (data.donors || []).length;\n    var memberCount = (data.members || []).length;\n\n    var summary = aidCount + \" Hane, \" + budgetCount + \" Kasa, \" + transferCount + \" Devir, \" + donorCount + \" Ba\u011f\u0131\u015f\u00e7\u0131, \" + memberCount + \" G\u00f6n\u00fcll\u00fc\";\n    var snapshot = {\n      hareBackup: true,\n      autoDaily: true,\n      version: \"3.2\",\n      date: Utilities.formatDate(now, \"GMT+3\", \"dd.MM.yyyy HH:mm\"),\n      summary: summary,\n      aids: data.aids || [],\n      budget: data.budget || [],\n      transfers: data.transfers || [],\n      donors: data.donors || [],\n      members: data.members || [],\n      settings: data.settings || {}\n    };\n\n    sheet.appendRow([\n      \"backup-\" + now.getTime(),\n      \"'\" + Utilities.formatDate(now, \"GMT+3\", \"dd.MM.yyyy HH:mm\"),\n      summary,\n      JSON.stringify(snapshot)\n    ]);\n    logAction(ss, \"Sistem\", \"Otomatik G\u00fcnl\u00fck Yedek\", todayStr + \" tarihli tam sistem yede\u011fi al\u0131nd\u0131 (\" + summary + \").\");\n  }\n}\n\n// Apps Script i\u00e7inden zamanl\u0131 tetikleyici (Zaman Tetikleyicisi / Trigger) i\u00e7in \u00e7a\u011fr\u0131labilir\nfunction otomatikGunlukYedek() {\n  var ss = getSS();\n  if (!ss) return;\n  var data = {\n    aids: readSheet(ss, \"Haneler\"),\n    budget: readSheet(ss, \"Sandik\"),\n    transfers: readSheet(ss, \"Devirler\"),\n    donors: readSheet(ss, \"Bagiscilar\"),\n    members: readSheet(ss, \"Gonulluler\"),\n    settings: readSettings(ss)\n  };\n  ensureDailyBackup(ss, data);\n}";
+
     window.copyAppsScriptCode = function() {
-      var codeText = '// Hâre Google Apps Script v3.2 (Yönetici Paneli, Yetki, Log Silme & Ayarlar Tam Uyumlu)\n' +
-        'var API_SECRET = "' + API_SECRET + '";\n' +
-        '// Tam kurulum dosyası proje klasörünüzdeki ai_studio_code.js içinde hazırdır.';
+      var codeText = window.FULL_APPS_SCRIPT_CODE || '';
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(codeText).then(function() {
-          showToast('📋 Bilgi panoya kopyalandı! Tam kod ai_studio_code.js dosyanızda güncellenmiştir.');
+          showToast('📋 Tam Google Apps Script kodu panoya kopyalandı!');
         });
       } else {
-        showToast('📋 Tam kod ai_studio_code.js dosyanızda güncellenmiştir.');
+        try {
+          var ta = document.createElement('textarea');
+          ta.value = codeText;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+          showToast('📋 Tam Google Apps Script kodu panoya kopyalandı!');
+        } catch(e) {
+          showToast('📋 Kod kutusundan seçip kopyalayabilirsiniz.');
+        }
       }
     };
 
@@ -6224,10 +6383,10 @@
     render();
     if (state.currentUser) {
       checkAndPerformAutoDailyBackup();
-      syncFromGoogleSheet(true);
+      syncFromGoogleSheet(false);
     } else {
-      // Giriş ekranında da (oturum kapalıyken) yeni eklenen üyeleri ve ayarları E-Tablodan çek
-      syncFromGoogleSheet(true, true);
+      // Giriş ekranında da (oturum kapalıyken) merkezi köprü linkini, üyeleri ve ayarları E-Tablodan anında çek
+      syncFromGoogleSheet(false, true);
     }
 
     // Canlı süreç kalp atışı (Uygulama açıkken veya arka planda bellekteyken oturumu canlı tutar)
