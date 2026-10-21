@@ -283,8 +283,11 @@
       shareCardFooter: '_Hâre İnsani Yardım Halkası_',
       logsClearedAt: 0,
       deletedLogKeys: [],
+      deletedIds: [],
       memberRolesMap: {},
-      memberPermsMap: {}
+      memberPermsMap: {},
+      memberPinsMap: {},
+      updatedAtTs: 0
     };
 
     function loadCachedSettings() {
@@ -351,13 +354,13 @@
     function compressPhotoHD(img, isDelivery) {
       var st = (typeof state !== 'undefined' && state.settings) ? state.settings : DEFAULT_SETTINGS;
       var preset = st.photoQualityPreset || 'hd';
-      var targetDim = preset === 'ultra' ? 1440 : (preset === 'eco' ? 960 : 1280);
-      var quality = preset === 'ultra' ? 0.88 : (preset === 'eco' ? 0.75 : 0.85);
+      var targetDim = preset === 'ultra' ? 1280 : (preset === 'eco' ? 840 : 1080);
+      var quality = preset === 'ultra' ? 0.84 : (preset === 'eco' ? 0.72 : 0.80);
       var maxPhotos = Math.max(1, Number(st.maxPhotosPerAid) || 3);
-      var maxAllowedBase64Len = Math.min(22000, Math.floor(47500 / maxPhotos));
+      var maxAllowedBase64Len = Math.min(15500, Math.floor(46500 / maxPhotos));
       var resultDataUrl = '';
 
-      for (var attempt = 0; attempt < 5; attempt++) {
+      for (var attempt = 0; attempt < 8; attempt++) {
         var canvas = document.createElement('canvas');
         var w = img.width || 1000;
         var h = img.height || 1000;
@@ -678,10 +681,21 @@
     // 🗑️ SİLİNMİŞ VE ESKİ KAYITLARI TAKİP VE ÖNBELLEK ENGELLEME MOTORU
     // =========================================================================
     function getDeletedIds() {
+      var localList = [];
       try {
         var raw = localStorage.getItem('hare_deleted_ids');
-        return raw ? JSON.parse(raw) : [];
-      } catch(e) { return []; }
+        if (raw) localList = JSON.parse(raw) || [];
+      } catch(e) {}
+      var settingsList = (typeof state !== 'undefined' && state.settings && Array.isArray(state.settings.deletedIds))
+        ? state.settings.deletedIds
+        : [];
+      if (settingsList.length === 0) return localList;
+      var combined = localList.slice();
+      settingsList.forEach(function(id) {
+        var clean = String(id || '').trim();
+        if (clean && !combined.includes(clean)) combined.push(clean);
+      });
+      return combined;
     }
 
     function markIdAsDeleted(id) {
@@ -692,11 +706,97 @@
         list.push(clean);
         try { localStorage.setItem('hare_deleted_ids', JSON.stringify(list)); } catch(e) {}
       }
+      if (typeof state !== 'undefined' && state.settings) {
+        if (!Array.isArray(state.settings.deletedIds)) state.settings.deletedIds = [];
+        if (!state.settings.deletedIds.includes(clean)) {
+          state.settings.deletedIds.push(clean);
+        }
+      }
+      unmarkIdDirty(clean);
     }
 
     function isIdDeleted(id) {
       if (!id) return false;
       return getDeletedIds().includes(String(id).trim());
+    }
+
+    // 🔄 CİHAZDA YENİ EKLENEN / DÜZENLENEN (HENÜZ SUNUCUYA YAZILMAMIŞ) KAYIT TAKİPÇİSİ
+    function getDirtyIds() {
+      try {
+        var raw = localStorage.getItem('hare_dirty_ids');
+        return raw ? (JSON.parse(raw) || []) : [];
+      } catch(e) { return []; }
+    }
+
+    function markIdDirty(id) {
+      if (!id) return;
+      var clean = String(id).trim();
+      var list = getDirtyIds();
+      if (!list.includes(clean)) {
+        list.push(clean);
+        try { localStorage.setItem('hare_dirty_ids', JSON.stringify(list)); } catch(e) {}
+      }
+    }
+
+    function unmarkIdDirty(id) {
+      if (!id) return;
+      var clean = String(id).trim();
+      var list = getDirtyIds().filter(function(x) { return x !== clean; });
+      try { localStorage.setItem('hare_dirty_ids', JSON.stringify(list)); } catch(e) {}
+    }
+
+    function clearAllDirtyIds() {
+      try { localStorage.removeItem('hare_dirty_ids'); } catch(e) {}
+    }
+
+    function isIdDirty(id) {
+      if (!id) return false;
+      return getDirtyIds().includes(String(id).trim());
+    }
+
+    // 📦 ESKİ APPS SCRIPT İLE %100 UYUMLU SANDIK (KASA) METADATA PAKETLEYİCİ & ÇÖZÜCÜ
+    var BUDGET_META_PREFIX = ' [[HM:';
+    var BUDGET_META_SUFFIX = ']]';
+
+    function packBudgetItemForServer(b) {
+      var copy = Object.assign({}, b);
+      var cleanDesc = String(copy.desc || '').replace(/\s*\[\[HM:\{.*?\}\]\]/g, '').trim();
+      var meta = {
+        c: copy.category || '',
+        g: copy.giver || '',
+        r: copy.receiver || ''
+      };
+      copy.desc = cleanDesc + BUDGET_META_PREFIX + JSON.stringify(meta) + BUDGET_META_SUFFIX;
+      return copy;
+    }
+
+    function unpackBudgetItemFromServer(b) {
+      if (!b || typeof b !== 'object') return b;
+      var copy = Object.assign({}, b);
+      var rawDesc = String(copy.desc || '');
+      var match = rawDesc.match(/\[\[HM:(\{.*?\})\]\]/);
+      if (match && match[1]) {
+        try {
+          var meta = JSON.parse(match[1]);
+          if (meta && typeof meta === 'object') {
+            if (!copy.category && meta.c) copy.category = meta.c;
+            if (!copy.giver && meta.g) copy.giver = meta.g;
+            if (!copy.receiver && meta.r) copy.receiver = meta.r;
+          }
+        } catch(e) {}
+        copy.desc = rawDesc.replace(/\s*\[\[HM:\{.*?\}\]\]/g, '').trim();
+      }
+      return copy;
+    }
+
+    function isSystemCarrierRow(item) {
+      if (!item) return false;
+      var idStr = String(item.id || '').trim();
+      var nameStr = String(item.name || '').trim();
+      return idStr === '__HARE_SYS_CONFIG__' ||
+             idStr === '__HARE_SYS_TRANSFERS__' ||
+             idStr.indexOf('__HARE_SYS_') === 0 ||
+             nameStr === '__SYS__';
     }
 
     window.clearCacheAndResync = async function() {
@@ -709,6 +809,7 @@
           }
         }
       } catch(e) {}
+      clearAllDirtyIds();
       await syncFromGoogleSheet(false);
       showToast('✅ E-Tablo ile eşitlendi!');
     };
@@ -783,23 +884,30 @@
     }
 
     // =========================================================================
-    // 🛡️ SUNUCU TARAFLI DOĞRULAMA & VERİ SENKRONİZASYONU
+    // 🛡️ SUNUCU TARAFLI DOĞRULAMA & CİHAZLAR ARASI CANLI EŞİTLEME MOTORU (v3.3)
     // =========================================================================
     async function serverLogin(memberId, pin, rememberMe) {
       var cleanPin = String(pin).trim();
       var targetId = String(memberId).trim();
-      
-      // 1. Önce yerel listeden kullanıcıyı bul
+
+      state.isSyncing = true;
+      render();
+
+      // Giriş öncesi E-Tablodan en güncel ekip ve PIN haritasını çek (Başka cihazda eklenen üye/PIN anında tanınsın)
+      try {
+        await syncFromGoogleSheet(true, true);
+      } catch(e) {}
+
       var localUser = state.members.find(function(m) {
         return String(m.id).trim() === targetId || String(m.name).trim() === targetId;
       });
 
-      // Varsayılan PIN kontrolü (Yerelde veya sunucu bağlantısı yokken bile girişi asla kilitlemez)
-      var expectedPin = (localUser && localUser.pin) ? String(localUser.pin).trim() : '1453';
-      var isPinCorrectLocally = (cleanPin === expectedPin || cleanPin === '1453');
-
-      state.isSyncing = true;
-      render();
+      var pinsMap = (state.settings && state.settings.memberPinsMap) ? state.settings.memberPinsMap : {};
+      var defaultPin = (state.settings && state.settings.defaultPin) ? String(state.settings.defaultPin).trim() : '1453';
+      var expectedPin = (localUser && pinsMap[String(localUser.id).trim()])
+        ? String(pinsMap[String(localUser.id).trim()]).trim()
+        : ((localUser && localUser.pin) ? String(localUser.pin).trim() : defaultPin);
+      var isPinCorrectLocally = (cleanPin === expectedPin || cleanPin === defaultPin);
 
       function applySuccessfulLogin(user) {
         state.currentUser = user;
@@ -811,13 +919,11 @@
         state.selectedAidId = null;
         state.editingAidId = null;
 
-        // Oturum hafızası: Uygulama arka plana atıldığında veya sayfa yenilendiğinde (F5) oturumu korur
         saveActiveSession(user);
         try {
           localStorage.setItem('hare_last_member_id', String(user.id));
         } catch(e) {}
 
-        // Yalnızca kullanıcı açıkça "Beni Hatırla" seçtiyse kalıcı oturum sakla
         if (rememberMe) {
           try {
             localStorage.setItem('hare_user', JSON.stringify(user));
@@ -834,17 +940,19 @@
       }
 
       try {
-        // Sunucuya doğrulamayı dene
         const controller = new AbortController();
-        const timeoutId = setTimeout(function() { controller.abort(); }, 4000); // 4 saniye zaman aşımı
+        const timeoutId = setTimeout(function() { controller.abort(); }, 6000);
 
+        // Not: Eski Apps Script sayısal ID beklediği için hem sayısal hem metin uyumlu gönderiyoruz
+        var compatMemberId = /^\d+$/.test(targetId) ? Number(targetId) : targetId;
         const res = await fetch(state.sheetUrl, {
           method: 'POST',
+          cache: 'no-store',
           signal: controller.signal,
           body: JSON.stringify({
             token: API_SECRET,
             action: 'login',
-            memberId: targetId,
+            memberId: compatMemberId,
             pin: cleanPin
           })
         });
@@ -852,12 +960,16 @@
         const data = await res.json();
 
         if (data && data.status === 'success' && data.user) {
-          applySuccessfulLogin(data.user);
+          var liveMember = state.members.find(function(m) { return String(m.id).trim() === String(data.user.id).trim(); });
+          var mergedUser = Object.assign({}, data.user, liveMember || {});
+          applySuccessfulLogin(mergedUser);
           await syncFromGoogleSheet(false);
           return;
         } else if (data && data.status === 'error' && !isPinCorrectLocally) {
           state.loginError = data.message || 'Girdiğiniz PIN kodu hatalı!';
           state.currentUser = null;
+          state.isSyncing = false;
+          render();
           return;
         }
       } catch (err) {
@@ -866,19 +978,25 @@
         state.isSyncing = false;
       }
 
-      // 2. YEREL GİRİŞ (Local / Çevrimdışı / İlk Kurulum Koruması)
       if (localUser && isPinCorrectLocally) {
+        if (!parseActive(localUser.active)) {
+          state.loginError = 'Hesabınız yönetici tarafından dondurulmuştur.';
+          state.currentUser = null;
+          render();
+          return;
+        }
         var userObj = {
           id: String(localUser.id),
           name: localUser.name,
           phone: localUser.phone || '',
           profession: localUser.profession || '',
-          role: localUser.role || 'member',
+          role: getMemberEffectiveRole(localUser),
+          permissions: getMemberEffectivePermissions(localUser),
           active: true
         };
         applySuccessfulLogin(userObj);
         render();
-        syncFromGoogleSheet(true);
+        syncFromGoogleSheet(false);
       } else {
         state.loginError = 'Girdiğiniz PIN kodu hatalı!';
         state.currentUser = null;
@@ -890,7 +1008,6 @@
       var input = document.getElementById('sheetUrlInput');
       if (input && input.value.trim()) {
         var rawUrl = input.value.trim();
-        // 🔒 URL Temizliği ve Sanitizasyonu (Tırnak, boşluk ve parametre temizleme)
         var cleanUrl = rawUrl.replace(/^['"\s]+|['"\s]+$/g, '').split('?')[0];
         if (cleanUrl.indexOf('https://script.google.com') === 0 && !cleanUrl.endsWith('/exec')) {
           if (cleanUrl.endsWith('/')) cleanUrl += 'exec';
@@ -913,15 +1030,245 @@
       await syncFromGoogleSheet(false);
     };
 
-    async function syncFromGoogleSheet(silent) {
-      if (!state.currentUser) return;
-      // Ekran kapalıysa veya internet kesikse sessiz periyodik istekleri beklet
-      if (silent && (document.hidden || (typeof navigator !== 'undefined' && 'onLine' in navigator && !navigator.onLine))) {
-        return;
+    // Sunucudan gelen ham JSON verisini ayrıştırır (Eski ve Yeni Apps Script ile %100 uyumlu)
+    function extractServerPayload(data) {
+      if (!data || data.error) return null;
+      var incomingSettings = null;
+      var incomingTransfers = null;
+
+      if (data.settings && typeof data.settings === 'object' && Object.keys(data.settings).length > 0) {
+        incomingSettings = Object.assign({}, data.settings);
       }
 
+      // 1. Bagiscilar (donors) içindeki sistem taşıyıcı satırlarını (__HARE_SYS_CONFIG__ ve __HARE_SYS_TRANSFERS__) çözümle
+      var cleanDonors = [];
+      if (Array.isArray(data.donors)) {
+        data.donors.forEach(function(d) {
+          if (!d) return;
+          var dId = String(d.id || '').trim();
+          if (dId === '__HARE_SYS_CONFIG__' && d.notes) {
+            try {
+              var parsedCfg = JSON.parse(d.notes);
+              if (parsedCfg && typeof parsedCfg === 'object') {
+                incomingSettings = Object.assign({}, parsedCfg, incomingSettings || {});
+              }
+            } catch(e) {}
+          } else if (dId === '__HARE_SYS_TRANSFERS__' && d.notes) {
+            try {
+              var parsedTr = JSON.parse(d.notes);
+              if (Array.isArray(parsedTr)) {
+                incomingTransfers = parsedTr;
+              }
+            } catch(e) {}
+          } else if (!isSystemCarrierRow(d)) {
+            cleanDonors.push(d);
+          }
+        });
+      }
+
+      // 2. Devirler (transfers) dizisi doğrudan varsa onu da çözümle
+      if (Array.isArray(data.transfers)) {
+        var sysRow = data.transfers.find(function(t) { return t && String(t.id).trim() === '__HARE_SYS_CONFIG__'; });
+        if (sysRow && sysRow.desc) {
+          try {
+            var parsedSys = JSON.parse(sysRow.desc);
+            if (parsedSys && typeof parsedSys === 'object') {
+              if (!incomingSettings || (Number(parsedSys.updatedAtTs || 0) > Number(incomingSettings.updatedAtTs || 0))) {
+                incomingSettings = Object.assign({}, incomingSettings || {}, parsedSys);
+              }
+            }
+          } catch(e) {}
+        }
+        var realTr = data.transfers.filter(function(t) { return t && !isSystemCarrierRow(t); });
+        if (realTr.length > 0 || !incomingTransfers) {
+          incomingTransfers = realTr;
+        }
+      }
+
+      // 3. Sandık (budget) kayıtlarındaki paketlenmiş [[HM:...]] kategori/veren/alan bilgilerini aç
+      var unpackedBudget = Array.isArray(data.budget)
+        ? data.budget.filter(function(b) { return b && !isSystemCarrierRow(b); }).map(unpackBudgetItemFromServer)
+        : null;
+
+      return {
+        aids: Array.isArray(data.aids) ? data.aids.filter(function(a) { return a && !isSystemCarrierRow(a); }) : null,
+        budget: unpackedBudget,
+        donors: cleanDonors,
+        transfers: incomingTransfers,
+        members: Array.isArray(data.members) ? data.members : null,
+        logs: Array.isArray(data.logs) ? data.logs : null,
+        settings: incomingSettings
+      };
+    }
+
+    // Cihazlar arası akıllı birleştirme:
+    // - Başka cihazda silinen kayıtlar (sunucuda olmayan ve bu cihazda yeni eklenmemiş olanlar) anında kaldırılır.
+    // - Başka cihazda düzenlenen veya eklenen kayıtlar anında alınır.
+    // - Yalnızca bu cihazda çevrimdışı eklenip henüz sunucuya gönderilmemiş (dirtyIds) kayıtlar korunur.
+    function mergeSafeList(localArr, serverArr, isAidList) {
+      var cleanServer = (serverArr || []).filter(function(x) { return x && !isIdDeleted(x.id) && !isSystemCarrierRow(x); });
+      var serverMap = {};
+      cleanServer.forEach(function(sx) { serverMap[String(sx.id).trim()] = sx; });
+      var localMap = {};
+      (localArr || []).forEach(function(lx) { if (lx && lx.id) localMap[String(lx.id).trim()] = lx; });
+
+      var mergedServer = cleanServer.map(function(sx) {
+        var sId = String(sx.id).trim();
+        var loc = localMap[sId];
+        // Eğer bu kayıt şu an bu cihazda düzenlendiyse ve henüz sunucuya yazılmadıysa yerel halini koru
+        if (loc && isIdDirty(sId)) {
+          return loc;
+        }
+        if (isAidList) {
+          sx.category = normalizeCategoryArray(sx.category);
+          if (Array.isArray(sx.photos)) {
+            var normalPhotos = [];
+            var packedDelivery = Array.isArray(sx.deliveryPhotos) ? sx.deliveryPhotos.slice() : [];
+            sx.photos.forEach(function(p) {
+              if (typeof p === 'string' && p.indexOf(';delivery=1;') !== -1) {
+                if (!packedDelivery.includes(p)) packedDelivery.push(p);
+              } else if (p) {
+                normalPhotos.push(p);
+              }
+            });
+            sx.photos = normalPhotos;
+            sx.deliveryPhotos = packedDelivery;
+          }
+        }
+        return sx;
+      });
+
+      // Yalnızca bu cihazda yeni oluşturulmuş ama henüz sunucuya gönderilmemiş (dirty) kayıtları koru
+      var localUnpushed = (localArr || []).filter(function(lx) {
+        if (!lx || !lx.id || isSystemCarrierRow(lx)) return false;
+        var lId = String(lx.id).trim();
+        return !serverMap[lId] && !isIdDeleted(lId) && isIdDirty(lId);
+      });
+
+      return localUnpushed.concat(mergedServer);
+    }
+
+    function applyExtractedPayloadToState(extracted) {
+      if (!extracted) return;
+
+      // 1. Önce Ayarlar ve Silinen ID listesini güncelle
+      if (extracted.settings) {
+        if (Array.isArray(extracted.settings.deletedIds)) {
+          var curDel = getDeletedIds();
+          extracted.settings.deletedIds.forEach(function(dId) {
+            var clean = String(dId || '').trim();
+            if (clean && !curDel.includes(clean)) curDel.push(clean);
+          });
+          try { localStorage.setItem('hare_deleted_ids', JSON.stringify(curDel)); } catch(e) {}
+        }
+        state.settings = Object.assign({}, DEFAULT_SETTINGS, state.settings, extracted.settings);
+        saveCacheItem('hare_cached_settings', state.settings);
+        if (state.settings.appTitle) {
+          document.title = state.settings.appTitle + ' — ' + (state.settings.appSubtitle || 'İnsani Yardım Halkası');
+        }
+      }
+
+      // 2. Haneler, Sandık, Devirler, Bağışçılar listelerini eşitle
+      if (Array.isArray(extracted.aids)) {
+        state.aids = mergeSafeList(state.aids, extracted.aids, true);
+        saveCacheItem('hare_cached_aids', state.aids);
+      }
+      if (Array.isArray(extracted.budget)) {
+        state.budget = mergeSafeList(state.budget, extracted.budget, false);
+        saveCacheItem('hare_cached_budget', state.budget);
+      }
+      if (Array.isArray(extracted.transfers)) {
+        state.transfers = mergeSafeList(state.transfers, extracted.transfers, false);
+        saveCacheItem('hare_cached_transfers', state.transfers);
+      }
+      if (Array.isArray(extracted.donors)) {
+        state.donors = mergeSafeList(state.donors, extracted.donors, false);
+        saveCacheItem('hare_cached_donors', state.donors);
+      }
+
+      // 3. Ekip üyeleri, roller, özel izinler ve PIN kodlarını eşitle
+      if (Array.isArray(extracted.members) && extracted.members.length > 0) {
+        var rolesMap = (state.settings && state.settings.memberRolesMap) ? state.settings.memberRolesMap : {};
+        var permsMap = (state.settings && state.settings.memberPermsMap) ? state.settings.memberPermsMap : {};
+        var pinsMap = (state.settings && state.settings.memberPinsMap) ? state.settings.memberPinsMap : {};
+        var defPin = (state.settings && state.settings.defaultPin) ? String(state.settings.defaultPin).trim() : '1453';
+
+        var serverMembers = extracted.members.filter(function(m) { return m && !isIdDeleted(m.id); }).map(function(m) {
+          var mId = String(m.id || '').trim();
+          var resolvedRole = rolesMap[mId] || (m.role ? String(m.role).trim() : 'member');
+          if (mId === '1' || String(m.name || '').toLowerCase().trim() === 'muhammet') resolvedRole = 'admin';
+          var resolvedPerms = Object.assign({}, (m.permissions && typeof m.permissions === 'object' ? m.permissions : {}), permsMap[mId] || {});
+          var resolvedPin = pinsMap[mId] || (m.pin ? String(m.pin).trim() : defPin);
+          return {
+            id: mId,
+            name: m.name || '',
+            phone: m.phone || '',
+            profession: m.profession || '',
+            role: resolvedRole,
+            permissions: resolvedPerms,
+            pin: resolvedPin,
+            active: parseActive(m.active)
+          };
+        });
+
+        state.members = mergeSafeList(state.members, serverMembers, false);
+        saveCacheItem('hare_cached_members', state.members);
+
+        // Aktif kullanıcının rol/yetki bilgisini canlı güncelle
+        if (state.currentUser) {
+          var liveMe = state.members.find(function(m) {
+            return String(m.id).trim() === String(state.currentUser.id).trim() ||
+                   String(m.name || '').toLowerCase().trim() === String(state.currentUser.name || '').toLowerCase().trim();
+          });
+          if (liveMe) {
+            if (!parseActive(liveMe.active)) {
+              showToast('⚠️ Hesabınız yönetici tarafından pasif duruma getirildi.');
+              window.logout();
+              return;
+            }
+            state.currentUser.role = liveMe.role;
+            state.currentUser.permissions = liveMe.permissions;
+            state.currentUser.phone = liveMe.phone;
+            state.currentUser.profession = liveMe.profession;
+            saveActiveSession(state.currentUser);
+          }
+        }
+      }
+
+      // 4. İşlem Günlüğü (Log) kayıtlarını eşitle
+      if (Array.isArray(extracted.logs)) {
+        var clearedAt = Number((state.settings && state.settings.logsClearedAt) || 0);
+        var delKeys = Array.isArray(state.settings && state.settings.deletedLogKeys) ? state.settings.deletedLogKeys : [];
+        var logMap = {};
+        // Sunucu logları + yerelde henüz gönderilmiş loglar
+        extracted.logs.concat(state.logs || []).forEach(function(l) {
+          if (l && l.details) {
+            var lKey = getLogUniqueKey(l);
+            if (delKeys.includes(lKey) || isIdDeleted(l.id)) return;
+            var lTs = l.id ? Number(String(l.id).replace(/[^0-9]/g, '')) : 0;
+            if (clearedAt > 0 && lTs > 0 && lTs <= clearedAt) return;
+            var dedupKey = (l.date || '') + '_' + l.details + '_' + (l.author || '');
+            if (!logMap[dedupKey]) logMap[dedupKey] = l;
+          }
+        });
+        var combined = Object.values(logMap);
+        combined.sort(function(a, b) {
+          var tA = a.id ? Number(String(a.id).replace(/[^0-9]/g, '')) : 0;
+          var tB = b.id ? Number(String(b.id).replace(/[^0-9]/g, '')) : 0;
+          return tB - tA;
+        });
+        state.logs = combined;
+        saveCacheItem('hare_cached_logs', state.logs);
+      }
+    }
+
+    async function syncFromGoogleSheet(silent, allowWhenLoggedOut) {
+      if (!state.currentUser && !allowWhenLoggedOut) return;
+      if (silent && document.hidden) return;
+      if (state.isPushing) return;
+
       var activeEl = document.activeElement;
-      var isTyping = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA');
+      var isTyping = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA') && !activeEl.readOnly;
       var isBusyWithForm = state.activeTab === 'yeni' || state.editingAidId || state.editingBudgetId || state.editingDonorId || state.editingMemberId;
 
       if (!silent && !isTyping && !isBusyWithForm) {
@@ -935,150 +1282,21 @@
       try {
         if ('AbortController' in window) {
           controller = new AbortController();
-          timeoutId = setTimeout(function() { controller.abort(); }, 9000);
+          timeoutId = setTimeout(function() { controller.abort(); }, 9500);
         }
 
-        // 🔒 Önbellek Engelleme (Cache-Busting): Benzersiz zaman parametresi eklenir
         var cacheBuster = '&_ts=' + Date.now() + '&_rnd=' + Math.floor(Math.random() * 1000000);
-        var fetchOpts = controller ? { signal: controller.signal } : {};
+        var fetchOpts = { cache: 'no-store' };
+        if (controller) fetchOpts.signal = controller.signal;
+
         const res = await fetch(state.sheetUrl + '?token=' + encodeURIComponent(API_SECRET) + cacheBuster, fetchOpts);
         if (timeoutId) clearTimeout(timeoutId);
 
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
-        if (data && !data.error) {
-          // Eğer o sırada kullanıcı bir silme/ekleme gönderiyorsa sunucudaki eski verinin yerel silinenleri geri getirmesini engelle
-          if (!state.isPushing) {
-            function mergeSafeList(localArr, serverArr, isAidList) {
-              var cleanServer = (serverArr || []).filter(function(x) { return x && !isIdDeleted(x.id); });
-              var serverMap = {};
-              cleanServer.forEach(function(sx) { serverMap[String(sx.id).trim()] = sx; });
-              var localMap = {};
-              (localArr || []).forEach(function(lx) { if (lx && lx.id) localMap[String(lx.id).trim()] = lx; });
-
-              // Sunucuda olan kayıtları al, teslimat fotoğraflarını ve sadeleştirilmiş kategorileri koru
-              var mergedServer = cleanServer.map(function(sx) {
-                var sId = String(sx.id).trim();
-                var loc = localMap[sId];
-                if (isAidList) {
-                  sx.category = normalizeCategoryArray(sx.category);
-                  if (Array.isArray(sx.photos)) {
-                    var normalPhotos = [];
-                    var packedDelivery = Array.isArray(sx.deliveryPhotos) ? sx.deliveryPhotos.slice() : [];
-                    sx.photos.forEach(function(p) {
-                      if (typeof p === 'string' && p.indexOf(';delivery=1;') !== -1) {
-                        if (!packedDelivery.includes(p)) packedDelivery.push(p);
-                      } else if (p) {
-                        normalPhotos.push(p);
-                      }
-                    });
-                    sx.photos = normalPhotos;
-                    sx.deliveryPhotos = packedDelivery;
-                  }
-                }
-                if (loc && isAidList) {
-                  if ((!Array.isArray(sx.deliveryPhotos) || sx.deliveryPhotos.length === 0) && Array.isArray(loc.deliveryPhotos) && loc.deliveryPhotos.length > 0) {
-                    sx.deliveryPhotos = loc.deliveryPhotos;
-                  }
-                  if ((!Array.isArray(sx.photos) || sx.photos.length === 0) && Array.isArray(loc.photos) && loc.photos.length > 0) {
-                    sx.photos = loc.photos;
-                  }
-                }
-                if (loc && !isAidList && !sx.category && loc.category) {
-                  sx.category = loc.category;
-                }
-                return sx;
-              });
-
-              // Yerelde yeni eklenmiş ama henüz sunucuya yansımamış kayıtları koru
-              var localOnly = (localArr || []).filter(function(lx) {
-                if (!lx || !lx.id) return false;
-                var lId = String(lx.id).trim();
-                return !serverMap[lId] && !isIdDeleted(lId);
-              });
-
-              return localOnly.concat(mergedServer);
-            }
-
-            if (Array.isArray(data.aids)) {
-              state.aids = mergeSafeList(state.aids, data.aids, true);
-              saveCacheItem('hare_cached_aids', state.aids);
-            }
-            if (Array.isArray(data.budget)) {
-              state.budget = mergeSafeList(state.budget, data.budget, false);
-              saveCacheItem('hare_cached_budget', state.budget);
-            }
-            // ⚙️ E-Tablo Sistem Ayarlarını Çözümle (Hem 'Ayarlar' sayfasından hem 'Devirler' sistem köprüsünden)
-            var incomingSettings = null;
-            if (data.settings && typeof data.settings === 'object' && Object.keys(data.settings).length > 0) {
-              incomingSettings = Object.assign({}, data.settings);
-            }
-            if (Array.isArray(data.transfers)) {
-              var sysRow = data.transfers.find(function(t) { return t && String(t.id).trim() === '__HARE_SYS_CONFIG__'; });
-              if (sysRow && sysRow.desc) {
-                try {
-                  var parsedSys = JSON.parse(sysRow.desc);
-                  if (parsedSys && typeof parsedSys === 'object') {
-                    incomingSettings = Object.assign({}, parsedSys, incomingSettings || {});
-                  }
-                } catch(e) {}
-              }
-              var realTransfers = data.transfers.filter(function(t) { return t && String(t.id).trim() !== '__HARE_SYS_CONFIG__'; });
-              state.transfers = mergeSafeList(state.transfers, realTransfers, false);
-              saveCacheItem('hare_cached_transfers', state.transfers);
-            }
-            if (incomingSettings) {
-              state.settings = Object.assign({}, DEFAULT_SETTINGS, state.settings, incomingSettings);
-              saveCacheItem('hare_cached_settings', state.settings);
-            }
-            if (Array.isArray(data.donors)) {
-              state.donors = mergeSafeList(state.donors, data.donors, false);
-              saveCacheItem('hare_cached_donors', state.donors);
-            }
-            if (Array.isArray(data.members) && data.members.length > 0) {
-              var rolesMap = (state.settings && state.settings.memberRolesMap) ? state.settings.memberRolesMap : {};
-              var permsMap = (state.settings && state.settings.memberPermsMap) ? state.settings.memberPermsMap : {};
-              state.members = data.members.filter(function(m) { return !isIdDeleted(m.id); }).map(function(m) {
-                var mId = String(m.id || '').trim();
-                var resolvedRole = rolesMap[mId] || (checkIsAdmin(m) ? 'admin' : (m.role || 'member'));
-                var resolvedPerms = Object.assign({}, (m.permissions && typeof m.permissions === 'object' ? m.permissions : {}), permsMap[mId] || {});
-                return {
-                  id: mId,
-                  name: m.name || '',
-                  phone: m.phone || '',
-                  profession: m.profession || '',
-                  role: resolvedRole,
-                  permissions: resolvedPerms,
-                  pin: m.pin ? String(m.pin).trim() : (state.settings.defaultPin || '1453'),
-                  active: parseActive(m.active)
-                };
-              });
-              try { localStorage.setItem('hare_cached_members', JSON.stringify(state.members)); } catch(e) {}
-            }
-          }
-          if (Array.isArray(data.logs) && !state.isPushing) {
-            var clearedAt = Number((state.settings && state.settings.logsClearedAt) || 0);
-            var delKeys = Array.isArray(state.settings && state.settings.deletedLogKeys) ? state.settings.deletedLogKeys : [];
-            var logMap = {};
-            state.logs.concat(data.logs).forEach(function(l) {
-              if (l && l.details) {
-                var lKey = getLogUniqueKey(l);
-                if (delKeys.includes(lKey) || isIdDeleted(l.id)) return;
-                var lTs = l.id ? Number(String(l.id).replace(/[^0-9]/g, '')) : 0;
-                if (clearedAt > 0 && lTs > 0 && lTs <= clearedAt) return;
-                var dedupKey = (l.date || '') + '_' + l.details + '_' + (l.author || '');
-                if (!logMap[dedupKey]) logMap[dedupKey] = l;
-              }
-            });
-            var combined = Object.values(logMap);
-            combined.sort(function(a, b) {
-              var tA = a.id ? Number(String(a.id).replace(/[^0-9]/g, '')) : 0;
-              var tB = b.id ? Number(String(b.id).replace(/[^0-9]/g, '')) : 0;
-              return tB - tA;
-            });
-            state.logs = combined;
-            saveCacheItem('hare_cached_logs', state.logs);
-          }
+        if (data && !data.error && !state.isPushing) {
+          var extracted = extractServerPayload(data);
+          applyExtractedPayloadToState(extracted);
         }
       } catch (err) {
         if (timeoutId) clearTimeout(timeoutId);
@@ -1086,9 +1304,17 @@
       } finally {
         state.isSyncing = false;
         state.lastSyncTime = getTurkeyDateTime();
-        checkAndPerformAutoDailyBackup();
+        if (state.currentUser) checkAndPerformAutoDailyBackup();
         if (!isTyping && !isBusyWithForm && !document.hidden) {
           render();
+        } else if (isTyping) {
+          // Kullanıcı arama kutusunda yazıyorsa imleci bozmadan yalnızca listeleri canlı güncelle
+          var aCont = document.getElementById('aidsListContainer');
+          if (aCont) aCont.innerHTML = renderAidsListHTML();
+          var dCont = document.getElementById('donorsListContainer');
+          if (dCont) dCont.innerHTML = renderDonorsListHTML();
+          var lCont = document.getElementById('logsListContainer');
+          if (lCont) lCont.innerHTML = renderLogsListHTML();
         }
       }
     }
@@ -1122,10 +1348,14 @@
         };
       }
 
-      // Üye rol ve yetki haritasını settings içine de senkronize et (E-Tablo tam uyumluluk garantisi)
+      // Üye rol, yetki, PIN ve silinen ID haritasını settings içine senkronize et (Tüm cihazlarda %100 eşitlenme garantisi)
       if (!state.settings) state.settings = Object.assign({}, DEFAULT_SETTINGS);
       if (!state.settings.memberRolesMap) state.settings.memberRolesMap = {};
       if (!state.settings.memberPermsMap) state.settings.memberPermsMap = {};
+      if (!state.settings.memberPinsMap) state.settings.memberPinsMap = {};
+      state.settings.deletedIds = getDeletedIds().slice(-400);
+      state.settings.updatedAtTs = Date.now();
+
       (state.members || []).forEach(function(m) {
         var mId = String(m.id || '').trim();
         if (mId) {
@@ -1133,10 +1363,13 @@
           if (m.permissions && typeof m.permissions === 'object') {
             state.settings.memberPermsMap[mId] = m.permissions;
           }
+          if (m.pin) {
+            state.settings.memberPinsMap[mId] = String(m.pin).trim();
+          }
         }
       });
 
-      // Yerel önbelleği anında güncelle (Çevrimdışı ve yenileme anında verilerin kaybolmasını engeller)
+      // Yerel önbelleği anında güncelle
       saveCacheItem('hare_cached_aids', state.aids);
       saveCacheItem('hare_cached_budget', state.budget);
       saveCacheItem('hare_cached_transfers', state.transfers);
@@ -1152,12 +1385,65 @@
       var controller = null;
       var timeoutId = null;
       try {
+        // 1. YAZMA ÖNCESİ BİRLEŞTİRME (Pull-Before-Push):
+        // Başka bir cihazda az önce eklenmiş bir kayıt varsa onu ezmemek için önce sunucudaki son durumu çekip yerel değişiklikle harmanla
+        try {
+          var preController = new AbortController();
+          var preTimeout = setTimeout(function() { preController.abort(); }, 5000);
+          var preRes = await fetch(state.sheetUrl + '?token=' + encodeURIComponent(API_SECRET) + '&_ts=' + Date.now(), {
+            cache: 'no-store',
+            signal: preController.signal
+          });
+          clearTimeout(preTimeout);
+          if (preRes.ok) {
+            var preData = await preRes.json();
+            var preExtracted = extractServerPayload(preData);
+            if (preExtracted) {
+              if (preExtracted.settings && Array.isArray(preExtracted.settings.deletedIds)) {
+                var curDel = getDeletedIds();
+                preExtracted.settings.deletedIds.forEach(function(dId) {
+                  var clean = String(dId || '').trim();
+                  if (clean && !curDel.includes(clean)) curDel.push(clean);
+                });
+                try { localStorage.setItem('hare_deleted_ids', JSON.stringify(curDel)); } catch(e) {}
+                state.settings.deletedIds = curDel.slice(-400);
+              }
+              if (Array.isArray(preExtracted.aids)) state.aids = mergeSafeList(state.aids, preExtracted.aids, true);
+              if (Array.isArray(preExtracted.budget)) state.budget = mergeSafeList(state.budget, preExtracted.budget, false);
+              if (Array.isArray(preExtracted.transfers)) state.transfers = mergeSafeList(state.transfers, preExtracted.transfers, false);
+              if (Array.isArray(preExtracted.donors)) state.donors = mergeSafeList(state.donors, preExtracted.donors, false);
+              if (Array.isArray(preExtracted.members) && preExtracted.members.length > 0) {
+                var rMap = (state.settings && state.settings.memberRolesMap) ? state.settings.memberRolesMap : {};
+                var pMap = (state.settings && state.settings.memberPermsMap) ? state.settings.memberPermsMap : {};
+                var pinMap = (state.settings && state.settings.memberPinsMap) ? state.settings.memberPinsMap : {};
+                var dPin = (state.settings && state.settings.defaultPin) ? String(state.settings.defaultPin).trim() : '1453';
+                var srvMembers = preExtracted.members.filter(function(m) { return m && !isIdDeleted(m.id); }).map(function(m) {
+                  var mId = String(m.id || '').trim();
+                  return {
+                    id: mId,
+                    name: m.name || '',
+                    phone: m.phone || '',
+                    profession: m.profession || '',
+                    role: rMap[mId] || m.role || 'member',
+                    permissions: Object.assign({}, m.permissions || {}, pMap[mId] || {}),
+                    pin: pinMap[mId] || (m.pin ? String(m.pin).trim() : dPin),
+                    active: parseActive(m.active)
+                  };
+                });
+                state.members = mergeSafeList(state.members, srvMembers, false);
+              }
+            }
+          }
+        } catch(preErr) {}
+
         if ('AbortController' in window) {
           controller = new AbortController();
-          timeoutId = setTimeout(function() { controller.abort(); }, 12000);
+          timeoutId = setTimeout(function() { controller.abort(); }, 14000);
         }
+
+        // 2. Fotoğrafları Google E-Tablo 50.000 karakter hücre sınırını asla aşmayacak şekilde hazırla
         var maxPhotos = Math.max(1, Number(state.settings.maxPhotosPerAid) || 3);
-        var aidsForServer = (state.aids || []).map(function(a) {
+        var aidsForServer = (state.aids || []).filter(function(a) { return a && !isIdDeleted(a.id); }).map(function(a) {
           var copy = Object.assign({}, a);
           var basePhotos = Array.isArray(a.photos) ? a.photos.slice() : [];
           var delPhotos = Array.isArray(a.deliveryPhotos) ? a.deliveryPhotos.map(function(dp) {
@@ -1166,12 +1452,19 @@
             }
             return dp;
           }) : [];
-          copy.photos = basePhotos.concat(delPhotos).slice(0, maxPhotos);
+          var combinedPhotos = basePhotos.concat(delPhotos).slice(0, maxPhotos);
+          while (combinedPhotos.length > 1 && JSON.stringify(combinedPhotos).length > 48000) {
+            combinedPhotos.pop();
+          }
+          copy.photos = combinedPhotos;
           return copy;
         });
 
-        // Sistem ayarlarını hem doğrudan `settings` alanı olarak hem de mevcut Apps Script ile %100 uyumlu sistem satırı olarak gönder
-        var cleanTransfers = (state.transfers || []).filter(function(t) { return t && String(t.id).trim() !== '__HARE_SYS_CONFIG__'; });
+        // 3. Sandık (Budget) kayıtlarını eski Apps Script ile de %100 uyumlu olacak şekilde paketle
+        var budgetForServer = (state.budget || []).filter(function(b) { return b && !isIdDeleted(b.id); }).map(packBudgetItemForServer);
+
+        // 4. Devirler ve Ayarlar için hem doğrudan alan hem de Bagiscilar (donors) taşıyıcı satırı oluştur
+        var cleanTransfers = (state.transfers || []).filter(function(t) { return t && !isSystemCarrierRow(t) && !isIdDeleted(t.id); });
         var sysConfigTransferRow = {
           id: '__HARE_SYS_CONFIG__',
           from: '__SYS__',
@@ -1186,13 +1479,42 @@
         };
         var transfersForServer = cleanTransfers.concat([sysConfigTransferRow]);
 
+        // Bagiscilar (donors) tablosu mevcut 136 satırlık Apps Script tarafından daima yazıldığı ve okunduğu için
+        // sistem ayarlarını ve devirleri burada taşıyıcı satır olarak da saklıyoruz (UI üzerinde tamamen gizlenir)
+        var cleanDonors = (state.donors || []).filter(function(d) { return d && !isSystemCarrierRow(d) && !isIdDeleted(d.id); });
+        var sysConfigDonorRow = {
+          id: '__HARE_SYS_CONFIG__',
+          name: '__SYS__',
+          phone: '',
+          city: '',
+          email: String(Date.now()),
+          notes: JSON.stringify(state.settings)
+        };
+        var sysTransfersDonorRow = {
+          id: '__HARE_SYS_TRANSFERS__',
+          name: '__SYS__',
+          phone: '',
+          city: '',
+          email: String(Date.now()),
+          notes: JSON.stringify(cleanTransfers)
+        };
+        var donorsForServer = cleanDonors.concat([sysConfigDonorRow, sysTransfersDonorRow]);
+
+        // 5. Gönüllüler (members) listesinde PIN kodlarının korunmasını garantile
+        var defaultPin = state.settings.defaultPin || '1453';
+        var membersForServer = (state.members || []).filter(function(m) { return m && !isIdDeleted(m.id); }).map(function(m) {
+          var mId = String(m.id || '').trim();
+          var savedPin = (state.settings.memberPinsMap && state.settings.memberPinsMap[mId]) || m.pin || defaultPin;
+          return Object.assign({}, m, { pin: String(savedPin).trim() });
+        });
+
         var bodyPayload = {
           token: API_SECRET,
           aids: aidsForServer,
-          budget: state.budget,
+          budget: budgetForServer,
           transfers: transfersForServer,
-          donors: state.donors,
-          members: state.members,
+          donors: donorsForServer,
+          members: membersForServer,
           settings: state.settings,
           overwriteLogs: Boolean(opts.overwriteLogs),
           logs: opts.overwriteLogs ? state.logs : undefined,
@@ -1201,11 +1523,20 @@
 
         var pushOpts = {
           method: 'POST',
+          cache: 'no-store',
           body: JSON.stringify(bodyPayload)
         };
         if (controller) pushOpts.signal = controller.signal;
-        await fetch(state.sheetUrl, pushOpts);
+        var res = await fetch(state.sheetUrl, pushOpts);
         if (timeoutId) clearTimeout(timeoutId);
+        if (res && res.ok) {
+          var resJson = await res.json();
+          if (resJson && resJson.status === 'success') {
+            clearAllDirtyIds();
+          } else if (resJson && resJson.message) {
+            console.warn('Sunucu yanıt uyarısı:', resJson.message);
+          }
+        }
       } catch (err) {
         if (timeoutId) clearTimeout(timeoutId);
         console.warn('E-Tablo yazma hatası:', err && err.message ? err.message : err);
@@ -3846,7 +4177,7 @@
 
       if (!Array.isArray(state.transfers)) state.transfers = [];
       state.transfers.unshift(newTransfer);
-
+      markIdDirty(newTransfer.id);
       pushToGoogleSheet('Emanet Devir Talebi', fromName + ' → ' + toName + ' (' + amt + ' TL) devir talebi oluşturuldu.');
       render();
       showToast('✅ Devir talebi oluşturuldu. ' + toName + ' kardeşimizin onayı bekleniyor.');
@@ -3860,7 +4191,7 @@
       showConfirm(t.from + ' tarafından gönderilen ' + t.amount + ' ₺ emaneti teslim aldığınızı onaylıyor musunuz?', function() {
         t.status = 'onaylandi';
         t.approvedAt = getTurkeyDateTime();
-
+        markIdDirty(t.id);
         pushToGoogleSheet('Emanet Devri Onaylandı', t.to + ', ' + t.from + '\'den ' + t.amount + ' TL emaneti teslim aldı.');
         render();
         showToast('✅ Emanet teslim alındı ve onaylandı. Kasalar güncellendi!');
@@ -3874,6 +4205,7 @@
 
       showConfirm(t.from + ' tarafından gönderilen ' + t.amount + ' ₺ devir talebini reddetmek istediğinize emin misiniz?', function() {
         t.status = 'reddedildi';
+        markIdDirty(t.id);
         pushToGoogleSheet('Emanet Devri Reddedildi', t.to + ', ' + t.from + '\'nin devir talebini reddetti.');
         render();
         showToast('Devir talebi reddedildi.');
@@ -3968,6 +4300,7 @@
         if (!state.settings.memberPermsMap) state.settings.memberPermsMap = {};
         state.settings.memberRolesMap[targetId] = nextRole;
         state.settings.memberPermsMap[targetId] = m.permissions;
+        markIdDirty(m.id);
         pushToGoogleSheet('Ekip Yetkisi Değiştirildi', m.name + ' yetkisi "' + nextTitle + '" olarak güncellendi.');
         render();
         showToast('✅ ' + m.name + ' yetkisi "' + nextTitle + '" olarak güncellendi!');
@@ -4018,6 +4351,7 @@
           m.pin = pinEl.value.trim();
         }
         var roleMeta = getRoleMeta(m);
+        markIdDirty(m.id);
         pushToGoogleSheet('Gönüllü Yetkisi Güncellendi', m.name + ' yetkisi (' + roleMeta.title + ') ve özel izinleri güncellendi.');
         state.editingMemberId = null;
         state.editMemberPermsDraft = null;
@@ -4105,6 +4439,7 @@
         item.notes = document.getElementById('editAidNotes').value;
         item.updatedBy = state.currentUser.name;
         item.updatedAt = getTurkeyDateTime();
+        markIdDirty(item.id);
         pushToGoogleSheet('Hane Güncellendi', item.name + ' hanesi güncellendi.');
         state.editingAidId = null;
         state.editPhotos = [];
@@ -4182,6 +4517,7 @@
         var erEl = document.getElementById('editBudgetReceiver');
         item.giver = egEl ? egEl.value.trim() : '';
         item.receiver = erEl ? erEl.value.trim() : '';
+        markIdDirty(item.id);
         pushToGoogleSheet('Kasa Güncellendi', item.desc + ' (' + item.amount + ' TL) güncellendi.');
         state.editingBudgetId = null;
         render();
@@ -4230,6 +4566,7 @@
         item.city = document.getElementById('editDonorCity').value;
         item.email = document.getElementById('editDonorEmail').value;
         item.notes = document.getElementById('editDonorNotes').value;
+        markIdDirty(item.id);
         pushToGoogleSheet('Bağışçı Güncellendi', item.name + ' bilgileri güncellendi.');
         state.editingDonorId = null;
         render();
@@ -4316,6 +4653,7 @@
       } catch(e) {}
       saveCacheItem('hare_cached_members', state.members);
 
+      if (currentMember) markIdDirty(currentMember.id);
       state.changingPin = false;
       pushToGoogleSheet('PIN Güncellendi', state.currentUser.name + ' kendi giriş PIN kodunu güncelledi.');
       render();
@@ -4352,6 +4690,7 @@
               item.updatedBy = state.currentUser ? state.currentUser.name : 'Gönüllü';
               item.updatedAt = getTurkeyDateTime();
 
+              markIdDirty(item.id);
               saveCacheItem('hare_cached_aids', state.aids);
               pushToGoogleSheet('Emanet Teslim Edildi', item.name + ' hanesine emanet teslim edildi ve teslimat fotoğrafı yüklendi.');
               render();
@@ -4372,6 +4711,7 @@
       if (!item || !Array.isArray(item.deliveryPhotos)) return;
       showConfirm('Bu teslimat fotoğrafını silmek istediğinize emin misiniz?', function() {
         item.deliveryPhotos.splice(photoIdx, 1);
+        markIdDirty(item.id);
         saveCacheItem('hare_cached_aids', state.aids);
         pushToGoogleSheet('Teslimat Fotoğrafı Silindi', item.name + ' hanesinden bir teslimat fotoğrafı kaldırıldı.');
         render();
@@ -4475,6 +4815,7 @@
           updatedAt: getTurkeyDateTime()
         };
         state.aids.unshift(newAid);
+        markIdDirty(newAid.id);
         saveCacheItem('hare_cached_aids', state.aids);
         state.newPhotos = [];
         state.activeTab = 'yardimlar';
@@ -4503,6 +4844,7 @@
         item.status = newStatus;
         item.updatedBy = state.currentUser.name;
         item.updatedAt = getTurkeyDateTime();
+        markIdDirty(item.id);
         pushToGoogleSheet('Durum Güncellendi', item.name + ' durumu ' + newStatus + ' yapıldı.');
         render();
       }
@@ -4532,6 +4874,7 @@
         date: getTurkeyDate()
       };
       state.budget.unshift(newItem);
+      markIdDirty(newItem.id);
       saveCacheItem('hare_cached_budget', state.budget);
       pushToGoogleSheet('Kasa Hareketi', newItem.desc + ' (' + newItem.amount + ' TL - ' + catVal + ') eklendi.');
       render();
@@ -4549,6 +4892,7 @@
         notes: document.getElementById('donorNotes').value
       };
       state.donors.unshift(newDonor);
+      markIdDirty(newDonor.id);
       pushToGoogleSheet('Bağışçı Eklendi', newDonor.name + ' kaydedildi.');
       render();
     };
@@ -4580,6 +4924,7 @@
       state.newMemberPermsDraft = null;
 
       state.members.push(newMember);
+      markIdDirty(newMember.id);
       var roleMeta = getRoleMeta(newMember);
       pushToGoogleSheet('Gönüllü Eklendi', newMember.name + ' (' + roleMeta.title + ') ekibe eklendi.');
       render();
@@ -4918,6 +5263,7 @@
       var m = state.members.find(function(x) { return String(x.id).trim() === targetId; });
       if (m) {
         m.active = !parseActive(m.active);
+        markIdDirty(m.id);
         var durumMetni = m.active ? 'Aktif yapıldı' : 'Donduruldu (Pasif)';
         pushToGoogleSheet('Gönüllü Durumu', m.name + ' durumu ' + durumMetni + ' yapıldı.');
         render();
@@ -5743,6 +6089,9 @@
       state.newPhotos = [];
       saveNavState();
       render();
+      if (state.currentUser && state.sheetUrl && !state.isSyncing && !state.isPushing) {
+        syncFromGoogleSheet(true);
+      }
     };
 
     window.setFilter = function(f) {
@@ -5876,6 +6225,9 @@
     if (state.currentUser) {
       checkAndPerformAutoDailyBackup();
       syncFromGoogleSheet(true);
+    } else {
+      // Giriş ekranında da (oturum kapalıyken) yeni eklenen üyeleri ve ayarları E-Tablodan çek
+      syncFromGoogleSheet(true, true);
     }
 
     // Canlı süreç kalp atışı (Uygulama açıkken veya arka planda bellekteyken oturumu canlı tutar)
@@ -5887,14 +6239,13 @@
       }
     }, 2000);
 
+    // ⚡ Cihazlar Arası Hızlı Otomatik Canlı Eşitleme (12 saniyede bir kontrol)
     setInterval(function() {
-      // Ekran kapalıyken veya internet yokken veya halihazırda istek sürerken boşuna istek atma
       if (document.hidden) return;
-      if (typeof navigator !== 'undefined' && 'onLine' in navigator && !navigator.onLine) return;
-      if (state.currentUser && state.sheetUrl && !state.isSyncing && !state.isPushing) {
-        syncFromGoogleSheet(true);
+      if (state.sheetUrl && !state.isSyncing && !state.isPushing) {
+        syncFromGoogleSheet(true, !state.currentUser);
       }
-    }, 30000);
+    }, 12000);
 
     // 📱 EKRAN KAPANMA / ARKA PLAN KORUMASI VE OTOMATİK UYANMA MOTORU
     document.addEventListener('visibilitychange', function() {
@@ -5919,10 +6270,10 @@
         state.isSyncing = false;
         state.isPushing = false;
         setTimeout(function() {
-          if (!document.hidden && (!('onLine' in navigator) || navigator.onLine) && state.currentUser && state.sheetUrl) {
-            syncFromGoogleSheet(true);
+          if (!document.hidden && state.sheetUrl) {
+            syncFromGoogleSheet(true, !state.currentUser);
           }
-        }, 600);
+        }, 400);
       }
     });
 
