@@ -1630,6 +1630,7 @@
           '<div>' +
             '<div class="flex justify-between items-center mb-1"><label class="text-xs font-bold text-slate-500 uppercase">Google Harita Konumu</label><div class="flex items-center space-x-1.5"><button type="button" id="geoBtn" onclick="getCurrentLocation(\'newMapsUrl\', this)" class="text-[11px] bg-emerald-50 text-emerald-800 border border-emerald-200 px-2.5 py-1 rounded-xl font-bold hover:bg-emerald-100 flex items-center space-x-1 active:scale-95 transition-all shadow-xs"><span>📍 Mevcut Konumumu Al</span></button><button type="button" onclick="generateMapLinkFromAddress(\'newMapsUrl\')" title="Girilen mahalle ve ilçeden harita linki oluşturur" class="text-[11px] bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-200 px-2.5 py-1 rounded-xl font-bold flex items-center space-x-1 active:scale-95 transition-all shadow-xs"><span>🗺️ Adresten Üret</span></button></div></div>' +
             '<input id="newMapsUrl" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm mt-1 outline-none focus:ring-2 focus:ring-emerald-600" placeholder="https://maps.google.com/..." />' +
+            '<p class="text-[10px] text-slate-400 mt-1 leading-snug">💡 APK uygulamasında telefon izin penceresi açılmıyorsa <strong>"🗺️ Adresten Üret"</strong> ile adresten anında navigasyon linki oluşturabilirsiniz.</p>' +
           '</div>' +
           '<div><label class="text-xs font-bold text-slate-500 uppercase block mb-1">Fotoğraflar (En fazla 3 adet)</label><input type="file" id="photoInput" accept="image/*" multiple onchange="handlePhotoSelect(event)" class="text-xs text-slate-500 file:mr-2 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-emerald-50 file:text-emerald-800 hover:file:bg-emerald-100 cursor-pointer" /><div id="photoPreviewContainer" class="flex gap-2 mt-2"></div></div>' +
           '<div><label class="text-xs font-bold text-slate-500 uppercase block mb-1">Emanet Türü (İhtiyaç Kalemleri)</label><div class="grid grid-cols-2 gap-2 text-xs font-bold">' + catOptions + '</div></div>' +
@@ -3405,23 +3406,31 @@
       var btn = btnEl;
       if (!btn && targetInputId === 'newMapsUrl') btn = document.getElementById('geoBtn');
 
+      var isFile = window.location.protocol === 'file:';
+      var isSecure = window.isSecureContext !== false;
+
+      // 1. KONTROL: Yerel dosya (file://) modunda Android WebView GPS iznini işletim sistemi seviyesinde engeller
+      if (isFile || !isSecure) {
+        showToast('⚠️ APK yerel dosya modunda çalıştığı için Android GPS iznini engelliyor. Adresten harita konumu üretildi.');
+        window.generateMapLinkFromAddress(targetInputId);
+        if (btn) btn.innerHTML = '<span>📍 Adres Konumu Eklendi</span>';
+        return;
+      }
+
       if (!navigator.geolocation) {
         showToast('Cihazınızda GPS desteği bulunamadı, adres konumu üretiliyor...');
         window.generateMapLinkFromAddress(targetInputId);
         return;
       }
 
-      if (btn) btn.innerHTML = '<span>⏳ GPS Başlatılıyor...</span>';
-      showToast('📍 Konum servisi başlatılıyor, lütfen bekleyiniz...');
+      if (btn) btn.innerHTML = '<span>⏳ İzin İsteniyor...</span>';
+      showToast('📍 Konum izni isteniyor, lütfen ekranda izin penceresi çıkarsa onaylayınız...');
 
       var isResolved = false;
-      var tickerTimer = null;
-      var safetyTimer = null;
-      var secondsPassed = 0;
+      var promptTimeout = null;
 
       function cleanup() {
-        if (tickerTimer !== null) { clearInterval(tickerTimer); tickerTimer = null; }
-        if (safetyTimer !== null) { clearTimeout(safetyTimer); safetyTimer = null; }
+        if (promptTimeout !== null) { clearTimeout(promptTimeout); promptTimeout = null; }
       }
 
       function applyPosition(pos, sourceLabel) {
@@ -3456,95 +3465,41 @@
         }
       }
 
-      // Canlı buton geri bildirim sayacı
-      tickerTimer = setInterval(function() {
-        secondsPassed++;
-        if (isResolved) return;
-        if (btn) {
-          if (secondsPassed < 4) {
-            btn.innerHTML = '<span>⏳ Konum Bekleniyor (' + secondsPassed + 's)...</span>';
-          } else if (secondsPassed < 10) {
-            btn.innerHTML = '<span>🛰️ Uydular Taranıyor (' + secondsPassed + 's)...</span>';
-          } else {
-            btn.innerHTML = '<span>📡 Sinyal Güçlendiriliyor (' + secondsPassed + 's)...</span>';
-          }
+      // ⏱️ 3.5 Saniyelik İzin Tetikleme Denetleyicisi:
+      // Eğer Android APK'sı kullanıcıya izin penceresini HİÇ GÖSTERMİYORSA (WebIntoApp manifest izni eksikse),
+      // kullanıcıyı sahte sayaçla bekletme! Hemen tespit edip adresten harita konumu üret.
+      promptTimeout = setTimeout(function() {
+        if (!isResolved) {
+          fallbackWithExplanation('APK cihazın konum iznini istemedi (Android Manifest yetkisi eksik).');
         }
-      }, 1000);
+      }, 3500);
 
-      // 1. AŞAMA: Anında Hazır Önbellek / Hızlı Ağ Kontrolü (Varsa 0.2 saniyede çözer)
       try {
         navigator.geolocation.getCurrentPosition(
           function(pos) {
-            applyPosition(pos, 'Hızlı Konum');
+            applyPosition(pos, 'Canlı GPS');
           },
           function(err) {
-            startHighAccuracyGps();
+            var code = err ? err.code : 0;
+            if (code === 1) {
+              fallbackWithExplanation('Konum izni verilmedi.');
+            } else if (code === 2) {
+              fallbackWithExplanation('Cihazda GPS/Konum servisi kapalı.');
+            } else if (code === 3) {
+              fallbackWithExplanation('Konum zaman aşımına uğradı.');
+            } else {
+              fallbackWithExplanation('Konum alınamadı.');
+            }
           },
           {
-            enableHighAccuracy: false,
-            timeout: 2500,
-            maximumAge: 600000 // Son 10 dakikadaki hazır konumu anında kabul et
+            enableHighAccuracy: true,
+            timeout: 6000,
+            maximumAge: 300000
           }
         );
       } catch(e) {
-        startHighAccuracyGps();
+        fallbackWithExplanation('Konum servisi çağrılamadı.');
       }
-
-      // 2. AŞAMA: Canlı Yüksek Hassasiyetli GPS (Mobil uydular için gerçekçi 16 saniyelik pay)
-      function startHighAccuracyGps() {
-        if (isResolved) return;
-        try {
-          navigator.geolocation.getCurrentPosition(
-            function(pos) {
-              applyPosition(pos, 'Canlı GPS');
-            },
-            function(err) {
-              var code = err ? err.code : 0;
-              if (code === 1) {
-                fallbackWithExplanation('Uygulamaya konum izni verilmedi.');
-              } else {
-                tryNetworkFallback();
-              }
-            },
-            {
-              enableHighAccuracy: true,
-              timeout: 16000, // Mobil GPS donanımının uyduları bulabilmesi için gereken gerçekçi süre
-              maximumAge: 0
-            }
-          );
-        } catch(e) {
-          tryNetworkFallback();
-        }
-      }
-
-      // 3. AŞAMA: Ağ / Baz İstasyonu Fallback (Kapalı mekanda uydu görünmüyorsa)
-      function tryNetworkFallback() {
-        if (isResolved) return;
-        try {
-          navigator.geolocation.getCurrentPosition(
-            function(pos) {
-              applyPosition(pos, 'Ağ/Baz İstasyonu');
-            },
-            function(err) {
-              fallbackWithExplanation('GPS uyduları kapalı alanda bulunamadı.');
-            },
-            {
-              enableHighAccuracy: false,
-              timeout: 4000,
-              maximumAge: 600000
-            }
-          );
-        } catch(e) {
-          fallbackWithExplanation('Konum servisi yanıt vermedi.');
-        }
-      }
-
-      // 4. AŞAMA: 22 saniyelik nihai güvenlik zamanlayıcısı
-      safetyTimer = setTimeout(function() {
-        if (!isResolved) {
-          fallbackWithExplanation('GPS arama süresi aşıldı.');
-        }
-      }, 22000);
     };
 
     window.openMapForAid = function(id) {

@@ -93,31 +93,61 @@ Bu belgede, Hâre İnsani Yardım ve Ekip Koordinasyon Platformu'nda yapılan so
   * **Otomatik Uyanma ve Ağ Toparlanması (`visibilitychange` & `online`):** Ekran tekrar açıldığında askıda kalan eşitleme bayrakları sıfırlanır, ağ bağlantısının toparlanması için 600 ms beklenip taze veriler sessizce arka planda eşitlenir.
 
   * **Zararsız Ağ/Uyku Hatalarını Filtreleme:** Cihaz uyurken oluşan zararsız ağ kopması hataları (`Failed to fetch`, `NetworkError`, `AbortError`) filtrelendi; ekrana kırmızı hata basılması engellendi. Gerçek bir hata durumunda ise 4 saniye sonra otomatik kapanan ve üzerinde `✕` kapatma butonu bulunan esnek uyarı sistemi getirildi.
----
 
 ### 12. 📋 Girişte Daima "Haneler" Bölümünde Açılma Kuralı
-- **Yapılan İyileştirme:**
-  - Uygulama ilk açıldığında, sayfa yenilendiğinde veya PIN ile giriş yapıldığında; tarayıcı hafızasında hangi sekme kalmış olursa olsun sistem doğrudan **Haneler (Yardımlar)** ana ekranını açar.
-  - Açık kalan filtreler, detay modalları veya alt sekmeler temizlenerek gönüllülerin ilk gördüğü ekranın her zaman ihtiyaç sahibi haneler listesi olması garanti altına alındı.
 
----
+* **Yapılan İyileştirme:**
+
+  * Uygulama ilk açıldığında, sayfa yenilendiğinde veya PIN ile giriş yapıldığında; tarayıcı hafızasında hangi sekme kalmış olursa olsun sistem doğrudan **Haneler (Yardımlar)** ana ekranını açar.
+
+  * Açık kalan filtreler, detay modalları veya alt sekmeler temizlenerek gönüllülerin ilk gördüğü ekranın her zaman ihtiyaç sahibi haneler listesi olması garanti altına alındı.
 
 ### 13. 🔙 Geri Tuşunda Uygulamadan Çıkmayı Önleme (Gelişmiş WebView Geçmiş Tamponu)
-- **Sorun:** Kullanıcı "Hane Ekle (+)", "Sandık", "Hayırsever" veya "Gönüllü" sekmelerindeyken veya yeni hane eklerken Android donanım/hareket geri tuşuna bastığında, WebView geçmişi tükendiği için Android işletim sistemi uygulamayı doğrudan kapatıyordu.
-- **Çözüm:**
-  - **Kesintisiz Geçmiş Tamponu (`ensureHistoryBuffer`):** Android WebView'in `canGoBack()` denetimini her an canlı tutan döngüsel bir geçmiş tamponu oluşturuldu. Bu sayede Android işletim sistemi hiçbir zaman uygulamayı zorla kapatamaz.
-  - **Kademeli Geri Dönüş Hiyerarşisi:**
+
+* **Sorun:** Kullanıcı "Hane Ekle (+)", "Sandık", "Hayırsever" veya "Gönüllü" sekmelerindeyken veya yeni hane eklerken Android donanım/hareket geri tuşuna bastığında, WebView geçmişi tükendiği için Android işletim sistemi uygulamayı doğrudan kapatıyordu.
+
+* **Çözüm:**
+
+  * **Kesintisiz Geçmiş Tamponu (`ensureHistoryBuffer`):** Android WebView'in `canGoBack()` denetimini her an canlı tutan döngüsel bir geçmiş tamponu oluşturuldu. Bu sayede Android işletim sistemi hiçbir zaman uygulamayı zorla kapatamaz.
+
+  * **Kademeli Geri Dönüş Hiyerarşisi:**
+
     1. Açık bir onay veya bilgi penceresi (modal, fotoğraf, PIN değiştirme, düzenleme vb.) varsa önce o pencere kapatılır.
+
     2. Hayırsever Defteri, Sorumlu Kasası veya Kategori listeleme ekranı açıksa ana sekmeye dönülür.
+
     3. Hane Ekleme formunda veya başka bir sekmedeyse (`yeni`, `kasa`, `bagiscilar`, `ekip`), tek geri basışta güvenle **Haneler** ana sayfasına dönülür ve ekranda *"← Haneler ana sayfasına dönüldü"* bildirimi gösterilir.
+
     4. Sadece ve sadece zaten Haneler ana sayfasındayken geri basıldığında kullanıcıya çıkış için sağ üstteki **Çıkış (🚪)** butonunu kullanabileceği nazikçe hatırlatılır; uygulama kazara kapanmaz.
 
+### 14. 🛰️ Mobil GPS Zaman Aşımı Kökten Çözümü (3 Aşamalı Akıllı Konum Motoru)
+
+* **Sorun:** Masaüstü tarayıcılarda konum anında alınırken, cep telefonlarında ve Android WebView (APK) ortamında GPS donanımının uydulara kilitlenmesi 8-15 saniye sürer. Eski sistemdeki 3 ve 5 saniyelik agresif zamanlayıcılar uydular taranırken zaman aşımına uğruyor ve "Alınıyor..." yazısında takılıyordu.
+
+* **Çözüm:**
+
+  * **1. Aşama (0.2s - Anında Hızlı Konum):** Cihazın hafızasındaki veya Google Haritalar'dan kalma son 10 dakikalık hazır konum taranır; varsa 0.2 saniyede koordinatlar forma işlenir.
+
+  * **2. Aşama (16s - Canlı Yüksek Hassasiyetli GPS):** Mobil GPS donanımının gökyüzündeki uyduları bulabilmesi için gerçekçi bir 16 saniyelik süre tanındı. Buton üzerinde saniye sayacıyla *"🛰️ Uydular Taranıyor (X saniye)..."* canlı geri bildirimi verilir.
+
+  * **3. Aşama (Ağ / Baz İstasyonu Fallback):** Kapalı mekan veya bodrum katı gibi GPS sinyalinin ulaşamadığı noktalarda otomatik olarak baz istasyonu/hücresel konum devreye sokulur.
+
+  * **4. Aşama (Akıllı Adres Harita Üretimi):** Cihazda GPS tamamen kapalıysa veya izin verilmediyse formdaki İlçe, Mahalle ve Şehir bilgisi anında taranarak tek dokunuşla kusursuz Google Haritalar linkine dönüştürülür.
 ---
 
-### 14. 🛰️ Mobil GPS Zaman Aşımı Kökten Çözümü (3 Aşamalı Akıllı Konum Motoru)
-- **Sorun:** Masaüstü tarayıcılarda konum anında alınırken, cep telefonlarında ve Android WebView (APK) ortamında GPS donanımının uydulara kilitlenmesi 8-15 saniye sürer. Eski sistemdeki 3 ve 5 saniyelik agresif zamanlayıcılar uydular taranırken zaman aşımına uğruyor ve "Alınıyor..." yazısında takılıyordu.
-- **Çözüm:**
-  - **1. Aşama (0.2s - Anında Hızlı Konum):** Cihazın hafızasındaki veya Google Haritalar'dan kalma son 10 dakikalık hazır konum taranır; varsa 0.2 saniyede koordinatlar forma işlenir.
-  - **2. Aşama (16s - Canlı Yüksek Hassasiyetli GPS):** Mobil GPS donanımının gökyüzündeki uyduları bulabilmesi için gerçekçi bir 16 saniyelik süre tanındı. Buton üzerinde saniye sayacıyla *"🛰️ Uydular Taranıyor (X saniye)..."* canlı geri bildirimi verilir.
-  - **3. Aşama (Ağ / Baz İstasyonu Fallback):** Kapalı mekan veya bodrum katı gibi GPS sinyalinin ulaşamadığı noktalarda otomatik olarak baz istasyonu/hücresel konum devreye sokulur.
-  - **4. Aşama (Akıllı Adres Harita Üretimi):** Cihazda GPS tamamen kapalıysa veya izin verilmediyse formdaki İlçe, Mahalle ve Şehir bilgisi anında taranarak tek dokunuşla kusursuz Google Haritalar linkine dönüştürülür.
+### 15. 🛰️ Mobil APK'da Konum İzninin Çıkmaması Sorunu ve Çözüm Rehberi
+- **Sorunun Asıl Sebebi (Kullanıcı Tespiti Doğrulandı):**
+  - Web sürümünü Chrome üzerinden açtığınızda Chrome zaten Android'in yerel konum yetkisine sahip olduğu için kullanıcıya *"Bu sitenin konumunuza erişmesine izin verilsin mi?"* penceresini çıkarır ve izin verilince GPS'i alır.
+  - Ancak WebIntoApp ile üretilen APK'larda durum farklıdır: Android işletim sistemi, bir uygulamanın (APK) donanım GPS'ine erişebilmesi için APK paketinin içindeki `AndroidManifest.xml` dosyasında `<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />` yetkisini şart koşar.
+  - WebIntoApp'te APK üretilirken **"App Settings > Permissions"** sekmesindeki **"Location (GPS)"** kutucuğu işaretlenmemişse; Android işletim sistemi APK'nın konuma erişim hakkı olmadığını bildiği için kullanıcıya **izin sorma penceresini dahi açmaz**; isteği işletim sistemi seviyesinde doğrudan ve sessizce engeller. Bu yüzden uygulama ekranda bekler ve zaman aşımına uğrar.
+
+- **APK'da Gerçek GPS İznini Açmak İçin Yapılması Gereken (WebIntoApp Ayarı):**
+  1. [WebIntoApp.com](https://www.webIntoApp.com) kontrol panelinize girin ve projenizi açın.
+  2. Sol menüden **Settings (Ayarlar) > Permissions (İzinler)** sekmesine gelin.
+  3. **"Location (GPS)"** veya **"Geolocation"** seçeneğini **AKTİF (Açık)** yapın.
+  4. Yeni APK'yı indirip telefonunuza kurduğunuzda, telefon ilk basışta *"Hâre uygulamasının cihaz konumuna erişmesine izin verilsin mi?"* sistem kutusunu ekrana çıkaracaktır.
+
+- **Uygulama İçinde Yapılan İyileştirmeler (Sahte Beklemeye Son Verildi):**
+  - **Hızlı Teşhis (3.5 Saniye):** Konum butonuna basıldığında Android 3.5 saniye içinde izin penceresi açmıyorsa (APK izninin olmadığı kesinleştiğinde), artık sahte sayaçlarla 20 saniye bekletilmez.
+  - **Otomatik Adres Linki Üretimi:** Sistem APK'nın izin penceresi açmadığını hemen anlayıp formdaki Mahalle, İlçe ve Şehir bilgisinden anında kusursuz Google Haritalar navigasyon linkini üretir ve kutuya doldurur.
+  - **"Adresten Üret" Butonu:** Sahada GPS izniyle veya uydu aramayla hiç vakit kaybetmek istemeyen gönüllüler için **"🗺️ Adresten Üret"** butonu tek dokunuşla hazır durumdadır.
