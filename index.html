@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
-  <title>Hâre — İnsani Yardım ve Koordinasyon</title>
+  <title>Hâre — İnsani Yardım Halkası</title>
   
   <meta name="theme-color" content="#065f46">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -20,8 +20,8 @@
   <meta name="googlebot" content="noindex, nofollow">
 
   <!-- WHATSAPP VE SOSYAL MEDYA LİNK ÖNİZLEMESİ (Temiz Görünüm) -->
-  <meta property="og:title" content="Hâre — İyilik ve Yardımlaşma Ağı">
-  <meta property="og:description" content="Saha İnsani Yardım ve Ekip Koordinasyon Platformu">
+  <meta property="og:title" content="Hâre — İnsani Yardım Halkası">
+  <meta property="og:description" content="İyilik ve Takvâda Yardımlaşma — Saha İnsani Yardım ve Emanet Koordinasyonu">
   <meta property="og:type" content="website">
 
   <!-- Google Fonts -->
@@ -246,12 +246,36 @@
 
 
 
-    // İLK AÇILIŞ LİSTESİ (Şifreler/PIN'ler ASLA kodda tutulmaz!)
-    const INITIAL_MEMBERS = [
-      { id: '1', name: 'Muhammet', role: 'admin', phone: '05551234567', profession: 'Koordinatör / Öğretmen', active: true },
-      { id: '2', name: 'Ahmet', role: 'member', phone: '05559876543', profession: 'Elektrik Teknisyeni', active: true },
-      { id: '3', name: 'Emre', role: 'member', phone: '05554443322', profession: 'Lojistik / Şoför', active: true }
-    ];
+    // 🧹 ESKİ TEST VERİLERİNİ (Ahmet, Emre vb.) TARAYICI HAFIZASINDAN KALICI OLARAK TEMİZLE
+    (function sanitizeOldCaches() {
+      try {
+        var cached = localStorage.getItem('hare_cached_members');
+        if (cached && (cached.includes('Ahmet') || cached.includes('Emre') || cached.includes('05551234567'))) {
+          localStorage.removeItem('hare_cached_members');
+        }
+      } catch(e) {}
+    })();
+
+    // İLK AÇILIŞ LİSTESİ (Yalnızca gerçek kayıtlı yöneticiler)
+    const INITIAL_MEMBERS = (function() {
+      try {
+        var cached = localStorage.getItem('hare_cached_members');
+        if (cached) {
+          var parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            var filtered = parsed.filter(function(m) {
+              var n = String(m.name || '').toLowerCase().trim();
+              return n !== 'ahmet' && n !== 'emre';
+            });
+            if (filtered.length > 0) return filtered;
+          }
+        }
+      } catch(e) {}
+      return [
+        { id: '1', name: 'Muhammet', role: 'admin', phone: '05398235802', profession: 'Geleneksel Tıp', active: true },
+        { id: '1792546195426', name: 'Nurullah Torun', role: 'admin', phone: '05363912538', profession: 'Öğretmen', active: true }
+      ];
+    })();
 
     // UYGULAMA DURUMU (Veriler oturum açılana kadar BOŞTUR)
     const state = {
@@ -319,6 +343,7 @@
     window.clearCacheAndResync = async function() {
       showToast('🧹 Önbellek temizleniyor ve E-Tablo eşitleniyor...');
       try {
+        localStorage.removeItem('hare_deleted_ids');
         if ('caches' in window) {
           var names = await caches.keys();
           for (var i = 0; i < names.length; i++) {
@@ -504,6 +529,7 @@
                   active: parseActive(m.active)
                 };
               });
+              try { localStorage.setItem('hare_cached_members', JSON.stringify(state.members)); } catch(e) {}
             }
           }
           if (Array.isArray(data.logs)) {
@@ -834,7 +860,7 @@
         '⚠️ *Durum:* ' + item.status + '\n' +
         '📝 *Not:* ' + item.notes + '\n' +
         '🗺️ *Konum:* ' + (item.mapsUrl || 'Eklenmedi') + '\n\n' +
-        '_Hâre Yardımlaşma Halkası_';
+        '_Hâre İnsani Yardım Halkası_';
 
       var waUrl = 'https://api.whatsapp.com/send?text=' + encodeURIComponent(text);
       pushNavState('external');
@@ -1210,7 +1236,8 @@
         '<div class="text-center mb-8">' +
           '<div class="flex justify-center mb-3">' + renderLogo(76) + '</div>' +
           '<h1 class="text-3xl font-extrabold text-slate-900 tracking-tight font-display">Hâre</h1>' +
-          '<p class="text-xs font-semibold text-emerald-800 tracking-wide mt-1">Hayır ve İyilikte Yardımlaşma Halkası</p>' +
+          '<p class="text-xs font-bold text-emerald-800 tracking-wide mt-1">İnsani Yardım Halkası</p>' +
+          '<p class="text-[11px] text-slate-500 font-semibold mt-0.5">Hayır ve İyilikte Yardımlaşma Topluluğu</p>' +
           '<p class="text-[11px] text-slate-400 italic mt-0.5">“İyilik ve takvâda (sorumluluk bilincinde) yardımlaşın...” (Mâide, 2)</p>' +
           '<div class="w-10 h-1 bg-emerald-600 rounded-full mx-auto mt-3"></div>' +
         '</div>' +
@@ -1258,26 +1285,50 @@
       var netElden = eldenGelir - eldenGider;
       var toplamKalan = netBanka + netElden;
 
-      // ÜST BAR
-      var html = '<header class="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 px-4 py-2.5 flex items-center justify-between">' +
-        '<div class="flex items-center space-x-2">' +
-          renderLogo(36) +
-          '<div>' +
+      // ÜST BAR (Sade, Şık & Modern Mobil Tasarım - v2.6)
+      var syncBadge = '<button onclick="syncFromGoogleSheet()" title="E-Tablo Eşitle" class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold border transition-all active:scale-95 ' + 
+        (state.isSyncing ? 'bg-amber-50 text-amber-800 border-amber-300 animate-pulse' : 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100') + '">' +
+        '<span class="w-1.5 h-1.5 rounded-full ' + (state.isSyncing ? 'bg-amber-500 animate-ping' : 'bg-emerald-500') + '"></span>' +
+        '<span>' + (state.isSyncing ? 'Eşitleniyor' : 'Canlı') + '</span>' +
+        '<span class="text-[9px] opacity-70">🔄</span>' +
+      '</button>';
+
+      var cleanBadge = '<button onclick="clearCacheAndResync()" title="Önbellek Temizle" class="inline-flex items-center px-1.5 py-0.5 rounded-lg text-[10px] font-bold text-slate-500 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 active:scale-95 transition-all">' +
+        '<span>🧹</span>' +
+      '</button>';
+
+      var privacyBtn = '<button onclick="togglePrivacy()" title="' + (state.privacyMode ? 'Mahremiyet Modunu Kapat' : 'Mahremiyet Modunu Aç') + '" class="inline-flex items-center space-x-1 px-2.5 py-1 rounded-xl text-xs font-extrabold border shadow-sm transition-all active:scale-95 ' +
+        (state.privacyMode ? 'bg-amber-500 text-white border-amber-600 ring-2 ring-amber-300/40' : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200') + '">' +
+        '<span>' + (state.privacyMode ? '🔒' : '👁️') + '</span>' +
+        '<span class="text-[11px]">' + (state.privacyMode ? 'Mahrem' : 'Açık') + '</span>' +
+      '</button>';
+
+      var logoutBtn = '<button onclick="logout()" title="Çıkış Yap" class="w-8 h-8 rounded-xl flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200 active:scale-90 transition-all text-sm font-bold">' +
+        '🚪' +
+      '</button>';
+
+      var html = '<header class="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200/80 px-3.5 py-2 flex items-center justify-between shadow-xs">' +
+        // SOL: LOGO + İSİM & KÜNYE
+        '<div class="flex items-center space-x-2.5 min-w-0">' +
+          '<div class="shrink-0 drop-shadow-sm">' + renderLogo(34) + '</div>' +
+          '<div class="min-w-0">' +
             '<div class="flex items-center space-x-1.5">' +
-              '<span class="font-extrabold text-slate-900 block text-base leading-tight font-display">Hâre</span>' +
-              '<button onclick="syncFromGoogleSheet()" title="E-Tablo ile Canlı Eşitle" class="text-[9px] px-1.5 py-0.5 rounded-full font-bold flex items-center space-x-1 bg-emerald-100 text-emerald-800 active:scale-95 transition-all">' +
-                '<span>' + (state.isSyncing ? 'Eşitleniyor...' : '🟢 Canlı') + '</span><span>🔄</span>' +
-              '</button>' +
-              '<button onclick="clearCacheAndResync()" title="Önbelleği Temizle ve Eşitle" class="text-[9px] px-1.5 py-0.5 rounded-full font-bold flex items-center space-x-1 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 active:scale-95 transition-all">' +
-                '<span>🧹 Temizle</span>' +
-              '</button>' +
+              '<h1 class="font-extrabold text-slate-900 text-base leading-none font-display tracking-tight">Hâre</h1>' +
+              '<span class="text-[9px] font-bold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded-md border border-emerald-200/80 leading-none hidden sm:inline-block">Halka</span>' +
+              syncBadge +
+              cleanBadge +
             '</div>' +
-            '<span class="text-[10px] text-emerald-800 font-bold tracking-wider uppercase">' + esc(state.currentUser.name) + ' • ' + (isAdmin ? 'Emanetçi (Yönetici)' : 'Gönüllü Kardeşimiz') + '</span>' +
+            '<div class="text-[10px] text-slate-500 font-semibold tracking-wide truncate mt-0.5">' +
+              '<strong class="text-emerald-800 font-extrabold">' + esc(state.currentUser.name) + '</strong>' +
+              '<span class="text-slate-300 mx-1">•</span>' +
+              '<span>' + (isAdmin ? 'Emanetçi' : 'Gönüllü') + '</span>' +
+            '</div>' +
           '</div>' +
         '</div>' +
-        '<div class="flex items-center space-x-1.5">' +
-          '<button onclick="togglePrivacy()" class="px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all ' + (state.privacyMode ? 'bg-amber-100 text-amber-900 border border-amber-300 ring-2 ring-amber-300/40' : 'bg-slate-100 text-slate-600 border border-slate-200') + '">' + (state.privacyMode ? '🔒 Mahrem: Açık' : '👁️ Mahrem: Kapalı') + '</button>' +
-          '<button onclick="logout()" class="px-2.5 py-1.5 text-rose-600 hover:bg-rose-50 rounded-xl text-xs font-bold">Çıkış</button>' +
+        // SAĞ: BUTONLAR
+        '<div class="flex items-center space-x-1.5 shrink-0">' +
+          privacyBtn +
+          logoutBtn +
         '</div>' +
       '</header>';
 
@@ -1437,7 +1488,7 @@
         }).join('');
 
         html += '<form onsubmit="handleNewAid(event)" class="space-y-4 bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">' +
-          '<h2 class="font-extrabold text-slate-900 text-lg font-display">Yeni Hane (Aile) Kaydı</h2>' +
+          '<h2 class="font-extrabold text-slate-900 text-lg font-display">Yeni Hane (İhtiyaç Sahibi Kardeşimiz) Kaydı</h2>' +
           '<div><label class="text-xs font-bold text-slate-500 uppercase">Hane (Aile) Adı</label><input id="newFullName" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm mt-1 font-semibold outline-none focus:ring-2 focus:ring-emerald-600" placeholder="Örn: Ahmet Amca / Yetim Ailesi" /></div>' +
           '<div class="grid grid-cols-3 gap-2">' +
             '<div><label class="text-xs font-bold text-slate-500 uppercase">İl</label><input id="newCity" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm mt-1 font-semibold outline-none focus:ring-2 focus:ring-emerald-600" placeholder="İl" /></div>' +
@@ -1454,7 +1505,7 @@
           '<div><label class="text-xs font-bold text-slate-500 uppercase block mb-1">Emanet Türü (İhtiyaç Kalemleri)</label><div class="grid grid-cols-2 gap-2 text-xs font-bold">' + catOptions + '</div></div>' +
           '<div><label class="text-xs font-bold text-slate-500 uppercase">Aciliyet Durumu</label><select id="newStatus" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm mt-1 font-bold outline-none focus:ring-2 focus:ring-emerald-600"><option value="Acil İhtiyaç">🚨 Müstacel (Acil İhtiyaç)</option><option value="Planlandı">⏳ Planlandı (Hazırlık Aşamasında)</option><option value="Teslim Edildi">✅ Emanet (Yardım) Ulaştırıldı</option><option value="Periyodik Takip">🔄 Periyodik (Düzenli) Takip</option></select></div>' +
           '<div><label class="text-xs font-bold text-slate-500 uppercase">Tespit Notları ve Detaylar</label><textarea id="newNotes" rows="2" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm mt-1 outline-none focus:ring-2 focus:ring-emerald-600" placeholder="Aile durumu, acil ihtiyaçlar..."></textarea></div>' +
-          '<button type="submit" class="w-full bg-emerald-800 hover:bg-emerald-900 text-white font-extrabold py-3.5 rounded-2xl shadow-md font-display transition-all">Haneyi Kaydet ve E-Tabloya Gönder</button>' +
+          '<button type="submit" class="w-full bg-emerald-800 hover:bg-emerald-900 text-white font-extrabold py-3.5 rounded-2xl shadow-md font-display transition-all">Haneyi Kaydet ve Emanet Defterine Ekle</button>' +
         '</form>';
       }
 
@@ -1609,7 +1660,7 @@
           // 2. KULLANICININ KENDİ KASASINA HIZLI GEÇİŞ KARTI
           var myKasaQuickCard = '<div data-name="' + esc(currentUserName) + '" onclick="openMemberKasa(this.getAttribute(\'data-name\'))" class="bg-gradient-to-r from-emerald-900 to-emerald-800 text-white p-4 rounded-3xl shadow-md cursor-pointer active:scale-95 transition-all flex justify-between items-center">' +
             '<div>' +
-              '<span class="text-[10px] font-bold text-emerald-300 uppercase tracking-wider block">👤 Sizin Üzerinizdeki Emanet Kasası</span>' +
+              '<span class="text-[10px] font-bold text-emerald-300 uppercase tracking-wider block">👤 Sizin Zimmetinizdeki Emanet Kasası</span>' +
               '<h3 class="text-2xl font-extrabold font-display mt-0.5 ' + (state.privacyMode ? 'filter blur-[4px] select-none hover:blur-none' : '') + '">' + myKasa.net.toLocaleString('tr-TR') + ' ₺</h3>' +
               '<span class="text-[10px] text-emerald-200">🏦 Banka: ' + myKasa.banka.toLocaleString('tr-TR') + ' ₺ • 💵 Elden: ' + myKasa.elden.toLocaleString('tr-TR') + ' ₺</span>' +
             '</div>' +
@@ -1920,9 +1971,13 @@
                       '</div>' +
                     '</div>' +
                     '<div class="text-right">' +
-                      '<span class="font-extrabold text-sm font-display text-emerald-700 ' + (state.privacyMode ? 'filter blur-[4px] select-none hover:blur-none transition-all cursor-pointer' : '') + '">' +
+                      '<span class="font-extrabold text-sm font-display text-emerald-700 block ' + (state.privacyMode ? 'filter blur-[4px] select-none hover:blur-none transition-all cursor-pointer' : '') + '">' +
                         '+' + item.amount.toLocaleString('tr-TR') + ' ₺' +
                       '</span>' +
+                                            (isAdmin ? '<div class="flex justify-end space-x-1 mt-1.5">' +
+                        '<button type="button" data-id="' + esc(item.id) + '" onclick="openEditBudget(this.getAttribute(\'data-id\'))" class="text-[10px] text-emerald-800 font-bold hover:bg-slate-100 px-2 py-0.5 rounded border border-slate-200 active:scale-95 transition-all">✏️ Düzenle</button>' +
+                        '<button type="button" data-id="' + esc(item.id) + '" onclick="deleteBudgetItem(this.getAttribute(\'data-id\'))" class="text-[10px] text-rose-600 font-bold hover:bg-rose-50 px-2 py-0.5 rounded border border-rose-200 active:scale-95 transition-all">Sil</button>' +
+                      '</div>' : '') +
                     '</div>' +
                   '</div>' +
                 '</div>';
@@ -1983,12 +2038,12 @@
           // NORMAL HAYIRSEVERLER LİSTESİ
           html += '<div class="space-y-4">' +
             '<div class="bg-emerald-800 text-white p-5 rounded-3xl shadow-xl">' +
-              '<span class="text-xs font-bold text-emerald-200 uppercase tracking-wider">Kayıtlı Hayırseverler</span>' +
+              '<span class="text-xs font-bold text-emerald-200 uppercase tracking-wider">Kayıtlı Hayırsever Kardeşlerimiz</span>' +
               '<h2 class="text-3xl font-extrabold mt-1 font-display">' + state.donors.length + ' Kişi</h2>' +
-              '<p class="text-xs text-emerald-100 mt-1">Emanet ve yardımlara destek olan hayırsever kardeşlerimiz</p>' +
+              '<p class="text-xs text-emerald-100 mt-1">İyilik yolunda emanet ve yardımlara omuz veren hayırsever kardeşlerimiz</p>' +
             '</div>' +
             '<form onsubmit="handleNewDonor(event)" class="bg-white p-5 rounded-3xl border border-slate-200 space-y-3 shadow-sm">' +
-              '<span class="text-xs font-bold text-slate-800 uppercase block font-display">Yeni Hayırsever (Bağışçı) Ekle</span>' +
+              '<span class="text-xs font-bold text-slate-800 uppercase block font-display">Yeni Hayırsever (Bağışçı Kardeşimiz) Ekle</span>' +
               '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Ad Soyad</label><input id="donorName" required placeholder="Örn: Hacı Mehmet Bey" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
               '<div class="grid grid-cols-2 gap-2">' +
                 '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Telefon Numarası</label><input id="donorPhone" type="tel" placeholder="05XXXXXXXXX" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
@@ -2039,8 +2094,8 @@
           html += '<div class="space-y-3">' +
             '<div class="bg-emerald-950 text-white p-4 rounded-3xl shadow-md">' +
               '<span class="text-[10px] font-bold text-emerald-300 uppercase tracking-wider">' + state.members.filter(function(m) { return m.active; }).length + ' Aktif Gönüllü</span>' +
-              '<h3 class="text-lg font-extrabold font-display">Gönüllü İletişim Rehberi</h3>' +
-              '<p class="text-xs text-emerald-100">Ekip arkadaşlarınıza doğrudan telefonla veya WhatsApp ile ulaşabilirsiniz.</p>' +
+              '<h3 class="text-lg font-extrabold font-display">Hâre İnsani Yardım Halkası Gönüllü Rehberi</h3>' +
+              '<p class="text-xs text-emerald-100">İyilik ve takvâ yolunda omuz omuza çalışan gönüllü kardeşlerimizin rehberi.</p>' +
             '</div>' +
             '<div class="space-y-2.5">' + membersListHTML + '</div>' +
           '</div>';
@@ -2376,7 +2431,7 @@
         '<button onclick="setTab(\'yardimlar\')" class="flex flex-col items-center flex-1 active:scale-95 transition-transform ' + (state.activeTab === 'yardimlar' ? 'text-emerald-800 font-extrabold' : 'text-slate-400 font-medium') + '"><span class="text-lg">📋</span><span class="text-[10px] mt-0.5 font-bold">Haneler</span></button>' +
         '<button onclick="setTab(\'kasa\')" class="flex flex-col items-center flex-1 active:scale-95 transition-transform ' + (state.activeTab === 'kasa' ? 'text-emerald-800 font-extrabold' : 'text-slate-400 font-medium') + '"><span class="text-lg">🗳️</span><span class="text-[10px] mt-0.5 font-bold">Sandık</span></button>' +
         '<button onclick="setTab(\'yeni\')" class="flex flex-col items-center flex-1 active:scale-95 transition-transform ' + (state.activeTab === 'yeni' ? 'text-emerald-800 font-bold' : 'text-slate-400 font-medium') + '"><div class="w-11 h-11 -mt-7 bg-emerald-800 text-white rounded-full flex items-center justify-center text-2xl shadow-xl shadow-emerald-800/40 ring-4 ring-white active:scale-95 transition-transform">+</div><span class="text-[10px] mt-0.5 font-bold">Hane Ekle</span></button>' +
-        '<button onclick="setTab(\'bagiscilar\')" class="flex flex-col items-center flex-1 active:scale-95 transition-transform ' + (state.activeTab === 'bagiscilar' ? 'text-emerald-800 font-extrabold' : 'text-slate-400 font-medium') + '"><span class="text-lg">🤝</span><span class="text-[10px] mt-0.5 font-bold">Bağışçı</span></button>' +
+        '<button onclick="setTab(\'bagiscilar\')" class="flex flex-col items-center flex-1 active:scale-95 transition-transform ' + (state.activeTab === 'bagiscilar' ? 'text-emerald-800 font-extrabold' : 'text-slate-400 font-medium') + '"><span class="text-lg">🤝</span><span class="text-[10px] mt-0.5 font-bold">Hayırsever</span></button>' +
         '<button onclick="setTab(\'ekip\')" class="flex flex-col items-center flex-1 active:scale-95 transition-transform ' + (state.activeTab === 'ekip' ? 'text-emerald-800 font-extrabold' : 'text-slate-400 font-medium') + '"><span class="text-lg">👥</span><span class="text-[10px] mt-0.5 font-bold">Gönüllü</span></button>' +
       '</nav>';
 
