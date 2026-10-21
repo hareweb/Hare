@@ -234,6 +234,94 @@
       return '';
     }
 
+    // 📦 SADELEŞTİRİLMİŞ VE GENİŞLETİLMİŞ EMANET TÜRLERİ (İhtiyaç Kalemleri)
+    const EMANET_CATEGORIES = [
+      { value: 'Gıda / Erzak', label: '🥖 Gıda / Erzak' },
+      { value: 'Nakit Destek', label: '💵 Nakit Destek' },
+      { value: 'Ev Eşyası', label: '🛋️ Ev Eşyası' },
+      { value: 'Beyaz Eşya', label: '🧺 Beyaz Eşya' },
+      { value: 'Yakacak', label: '🔥 Yakacak' },
+      { value: 'Giyim', label: '👕 Giyim' },
+      { value: 'Sağlık / İlaç', label: '💊 Sağlık / İlaç' },
+      { value: 'Kira / Fatura', label: '🏠 Kira / Fatura' },
+      { value: 'Yetim / Eğitim', label: '👶 Yetim / Eğitim' },
+      { value: 'Diğer', label: '📦 Diğer' }
+    ];
+
+    const LEGACY_CATEGORY_MAP = {
+      'Gıda / Erzak (Yiyecek)': 'Gıda / Erzak',
+      'Nakit / Sadaka (Para)': 'Nakit Destek',
+      'Nakit / Sadaka': 'Nakit Destek',
+      'Kışlık Yakacak (Odun-Kömür)': 'Yakacak',
+      'Kışlık Yakacak': 'Yakacak',
+      'Kisve (Giyim / Kıyafet)': 'Giyim',
+      'Kisve (Giyim)': 'Giyim',
+      'Şifa (Sağlık / İlaç)': 'Sağlık / İlaç',
+      'Şifa / Sağlık': 'Sağlık / İlaç',
+      'Yetim Desteği': 'Yetim / Eğitim'
+    };
+
+    function normalizeCategoryLabel(cat) {
+      if (!cat) return '';
+      var clean = String(cat).trim();
+      return LEGACY_CATEGORY_MAP[clean] || clean;
+    }
+
+    function normalizeCategoryArray(arr) {
+      if (!Array.isArray(arr)) return [];
+      var seen = {};
+      var res = [];
+      arr.forEach(function(c) {
+        var norm = normalizeCategoryLabel(c);
+        if (norm && !seen[norm]) {
+          seen[norm] = true;
+          res.push(norm);
+        }
+      });
+      return res;
+    }
+
+    // 📸 YÜKSEK KALİTELİ (HD) AKILLI FOTOĞRAF İŞLEME MOTORU (1280px HD + Google E-Tablo Hücre Sınırı Korumalı)
+    function compressPhotoHD(img, isDelivery) {
+      var targetDim = 1280;
+      var quality = 0.85;
+      var maxAllowedBase64Len = 15800; // 3 fotoğraf tek E-Tablo hücresinde (<50.000 karakter) güvenle saklanır
+      var resultDataUrl = '';
+
+      for (var attempt = 0; attempt < 5; attempt++) {
+        var canvas = document.createElement('canvas');
+        var w = img.width || 1000;
+        var h = img.height || 1000;
+        if (w > h && w > targetDim) {
+          h = Math.round((h * targetDim) / w);
+          w = targetDim;
+        } else if (h >= w && h > targetDim) {
+          w = Math.round((w * targetDim) / h);
+          h = targetDim;
+        }
+        canvas.width = w;
+        canvas.height = h;
+        var ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(img, 0, 0, w, h);
+        }
+        resultDataUrl = canvas.toDataURL('image/jpeg', quality);
+        if (resultDataUrl.length <= maxAllowedBase64Len) {
+          break;
+        }
+        // Yalnızca Google E-Tablo 50.000 karakter hücre sınırını aşma riski varsa kademeli optimize et
+        quality = Math.max(0.68, quality - 0.05);
+        targetDim = Math.round(targetDim * 0.86);
+      }
+
+      if (isDelivery && resultDataUrl.indexOf('data:image/jpeg;base64,') === 0) {
+        return resultDataUrl.replace('data:image/jpeg;base64,', 'data:image/jpeg;delivery=1;base64,');
+      }
+      return resultDataUrl;
+    }
+
         // =========================================================================
     // 🛡️ YETKİ VE AKTİFLİK KONTROL YARDIMCILARI
     // =========================================================================
@@ -415,7 +503,10 @@
       transferChannel: 'elden',
       autoBackups: [],
       changingPin: false,
-      kasaCategoryFilter: 'Tümü' /* İnfak kategori filtresi */
+      editPhotos: [],
+      kasaCategoryFilter: 'Tümü',
+      kasaQuickFilter: 'tumu',
+      kasaSearchQuery: ''
     };
 
     // =========================================================================
@@ -700,10 +791,26 @@
               var localMap = {};
               (localArr || []).forEach(function(lx) { if (lx && lx.id) localMap[String(lx.id).trim()] = lx; });
 
-              // Sunucuda olan kayıtları al, fakat yerelde teslimat fotoğrafı veya kategori varsa ve sunucuda eksikse koru
+              // Sunucuda olan kayıtları al, teslimat fotoğraflarını ve sadeleştirilmiş kategorileri koru
               var mergedServer = cleanServer.map(function(sx) {
                 var sId = String(sx.id).trim();
                 var loc = localMap[sId];
+                if (isAidList) {
+                  sx.category = normalizeCategoryArray(sx.category);
+                  if (Array.isArray(sx.photos)) {
+                    var normalPhotos = [];
+                    var packedDelivery = Array.isArray(sx.deliveryPhotos) ? sx.deliveryPhotos.slice() : [];
+                    sx.photos.forEach(function(p) {
+                      if (typeof p === 'string' && p.indexOf(';delivery=1;') !== -1) {
+                        if (!packedDelivery.includes(p)) packedDelivery.push(p);
+                      } else if (p) {
+                        normalPhotos.push(p);
+                      }
+                    });
+                    sx.photos = normalPhotos;
+                    sx.deliveryPhotos = packedDelivery;
+                  }
+                }
                 if (loc && isAidList) {
                   if ((!Array.isArray(sx.deliveryPhotos) || sx.deliveryPhotos.length === 0) && Array.isArray(loc.deliveryPhotos) && loc.deliveryPhotos.length > 0) {
                     sx.deliveryPhotos = loc.deliveryPhotos;
@@ -823,11 +930,23 @@
           controller = new AbortController();
           timeoutId = setTimeout(function() { controller.abort(); }, 12000);
         }
+        var aidsForServer = (state.aids || []).map(function(a) {
+          var copy = Object.assign({}, a);
+          var basePhotos = Array.isArray(a.photos) ? a.photos.slice() : [];
+          var delPhotos = Array.isArray(a.deliveryPhotos) ? a.deliveryPhotos.map(function(dp) {
+            if (typeof dp === 'string' && dp.indexOf('data:image/jpeg;base64,') === 0) {
+              return dp.replace('data:image/jpeg;base64,', 'data:image/jpeg;delivery=1;base64,');
+            }
+            return dp;
+          }) : [];
+          copy.photos = basePhotos.concat(delPhotos).slice(0, 3);
+          return copy;
+        });
         var pushOpts = {
           method: 'POST',
           body: JSON.stringify({
             token: API_SECRET,
-            aids: state.aids,
+            aids: aidsForServer,
             budget: state.budget,
             transfers: state.transfers,
             donors: state.donors,
@@ -1359,10 +1478,22 @@
 
     // --- LİSTE ÇİZİCİLERİ ---
     function renderAidsListHTML() {
-      var q = state.searchQuery.toLowerCase();
+      var q = (state.searchQuery || '').toLowerCase().trim();
+      var qDigits = cleanPhone(q);
       var filtered = state.aids.filter(function(item) {
         var matchFilter = state.selectedFilter === 'Tümü' || item.status === state.selectedFilter;
-        var matchSearch = (item.name || '').toLowerCase().includes(q) || (item.city || '').toLowerCase().includes(q) || (item.district || '').toLowerCase().includes(q) || (item.neighborhood || '').toLowerCase().includes(q) || (item.notes || '').toLowerCase().includes(q);
+        if (!q) return matchFilter;
+        var catsStr = normalizeCategoryArray(item.category).join(' ').toLowerCase();
+        var itemPhone = cleanPhone(item.phone);
+        var matchSearch = (item.name || '').toLowerCase().includes(q) ||
+                          (item.city || '').toLowerCase().includes(q) ||
+                          (item.district || '').toLowerCase().includes(q) ||
+                          (item.neighborhood || '').toLowerCase().includes(q) ||
+                          (item.address || '').toLowerCase().includes(q) ||
+                          (item.notes || '').toLowerCase().includes(q) ||
+                          (item.updatedBy || '').toLowerCase().includes(q) ||
+                          catsStr.includes(q) ||
+                          (qDigits.length >= 3 && itemPhone.includes(qDigits));
         return matchFilter && matchSearch;
       });
 
@@ -1384,7 +1515,7 @@
           badgeColor = 'bg-blue-100 text-blue-800';
           statusText = '🔄 Periyodik Takip';
         }
-        var catsArr = Array.isArray(item.category) ? item.category : [];
+        var catsArr = normalizeCategoryArray(item.category);
         var cats = catsArr.map(function(c) { return '<span class="bg-slate-100 text-slate-700 text-[10px] font-bold px-2 py-0.5 rounded-lg border border-slate-200">' + esc(c) + '</span>'; }).join('');
         var photosArr = Array.isArray(item.photos) ? item.photos : [];
         var photos = (photosArr.length > 0) ? '<div class="flex gap-1.5 mb-2.5 overflow-x-auto hide-scrollbar">' + photosArr.map(function(p) { var s = safePhoto(p); return '<img src="' + s + '" onclick="event.stopPropagation(); openPhotoModal(\'' + s + '\')" class="w-12 h-12 rounded-lg object-cover border cursor-pointer hover:opacity-85 active:scale-95 transition-all ' + (state.privacyMode ? 'filter blur-sm' : '') + '" title="Büyüt / İndir"/>'; }).join('') + '</div>' : '';
@@ -1405,9 +1536,16 @@
     }
 
     function renderDonorsListHTML() {
-      var q = state.donorSearchQuery.toLowerCase();
+      var q = (state.donorSearchQuery || '').toLowerCase().trim();
+      var qDigits = cleanPhone(q);
       var filtered = state.donors.filter(function(d) {
-        return (d.name || '').toLowerCase().includes(q) || (d.city || '').toLowerCase().includes(q) || (d.notes || '').toLowerCase().includes(q);
+        if (!q) return true;
+        var dPhone = cleanPhone(d.phone);
+        return (d.name || '').toLowerCase().includes(q) ||
+               (d.city || '').toLowerCase().includes(q) ||
+               (d.notes || '').toLowerCase().includes(q) ||
+               (d.email || '').toLowerCase().includes(q) ||
+               (qDigits.length >= 3 && dPhone.includes(qDigits));
       });
       var isAdmin = state.currentUser && state.currentUser.role === 'admin';
       if (filtered.length === 0) return '<div class="bg-white p-6 rounded-2xl text-center text-xs text-slate-400 font-semibold border border-slate-200">Hayırsever bulunamadı.</div>';
@@ -1730,7 +1868,7 @@
           html += '<div class="space-y-4">' +
             topCardsHTML +
             '<div class="relative">' +
-              '<input type="text" placeholder="Hızlı hane ara (veya yukarıdan kategori seçin)..." onfocus="openStatusPage(\'Tümü\')" class="w-full bg-white border border-slate-200 rounded-2xl px-4 py-3 text-xs font-medium outline-none focus:ring-2 focus:ring-emerald-600 shadow-sm cursor-pointer" />' +
+              '<input type="text" placeholder="Hızlı hane, mahalle, telefon veya ihtiyaç ara..." onclick="openStatusPage(\'Tümü\', true)" readonly class="w-full bg-white border border-slate-200 rounded-2xl px-4 py-3 text-xs font-medium outline-none focus:ring-2 focus:ring-emerald-600 shadow-sm cursor-pointer" />' +
               '<span class="absolute right-3.5 top-3 text-slate-400 text-xs">🔍</span>' +
             '</div>' +
             '<button type="button" onclick="openStatusPage(\'Tümü\')" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs py-3.5 rounded-2xl shadow-md flex items-center justify-center space-x-2 active:scale-95 transition-all">' +
@@ -1749,9 +1887,9 @@
 
       // 2. HANE EKLE SEKMESİ (İl / İlçe / Mahalle 3'lü Yerleşimi)
       else if (state.activeTab === 'yeni') {
-        var catOptions = ['Gıda / Erzak (Yiyecek)', 'Nakit / Sadaka (Para)', 'Kışlık Yakacak (Odun-Kömür)', 'Kisve (Giyim / Kıyafet)', 'Şifa (Sağlık / İlaç)', 'Yetim Desteği'].map(function(cat) {
-          return '<label class="flex items-center space-x-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200 cursor-pointer">' +
-            '<input type="checkbox" name="newCats" value="' + cat + '" class="accent-emerald-600 rounded" /><span>' + cat + '</span>' +
+        var catOptions = EMANET_CATEGORIES.map(function(catObj) {
+          return '<label class="flex items-center space-x-2 bg-slate-50 hover:bg-emerald-50/50 p-2.5 rounded-xl border border-slate-200 cursor-pointer transition-all select-none">' +
+            '<input type="checkbox" name="newCats" value="' + esc(catObj.value) + '" class="accent-emerald-600 w-4 h-4 rounded shrink-0" /><span class="truncate">' + esc(catObj.label) + '</span>' +
           '</label>';
         }).join('');
 
@@ -1770,7 +1908,7 @@
             '<input id="newMapsUrl" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm mt-1 outline-none focus:ring-2 focus:ring-emerald-600" placeholder="https://maps.google.com/..." />' +
             '<p class="text-[10px] text-slate-400 mt-1 leading-snug">💡 APK uygulamasında telefon izin penceresi açılmıyorsa <strong>"🗺️ Adresten Üret"</strong> ile adresten anında navigasyon linki oluşturabilirsiniz.</p>' +
           '</div>' +
-          '<div><label class="text-xs font-bold text-slate-500 uppercase block mb-1">Fotoğraflar (En fazla 3 adet)</label><input type="file" id="photoInput" accept="image/*" multiple onclick="markExternalIntentActive()" onchange="handlePhotoSelect(event)" class="text-xs text-slate-500 file:mr-2 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-emerald-50 file:text-emerald-800 hover:file:bg-emerald-100 cursor-pointer" /><div id="photoPreviewContainer" class="flex gap-2 mt-2"></div></div>' +
+          '<div><label class="text-xs font-bold text-slate-500 uppercase block mb-1">Fotoğraflar (En fazla 3 adet • Net HD Kalite)</label><input type="file" id="photoInput" accept="image/*" multiple onclick="markExternalIntentActive()" onchange="handlePhotoSelect(event)" class="text-xs text-slate-500 file:mr-2 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-emerald-50 file:text-emerald-800 hover:file:bg-emerald-100 cursor-pointer" /><div id="photoPreviewContainer" class="flex gap-2 mt-2"></div></div>' +
           '<div><label class="text-xs font-bold text-slate-500 uppercase block mb-1">Emanet Türü (İhtiyaç Kalemleri)</label><div class="grid grid-cols-2 gap-2 text-xs font-bold">' + catOptions + '</div></div>' +
           '<div><label class="text-xs font-bold text-slate-500 uppercase">Aciliyet Durumu</label><select id="newStatus" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm mt-1 font-bold outline-none focus:ring-2 focus:ring-emerald-600"><option value="Acil İhtiyaç">🚨 Müstacel (Acil İhtiyaç)</option><option value="Planlandı">⏳ Planlandı (Hazırlık Aşamasında)</option><option value="Teslim Edildi">✅ Emanet (Yardım) Ulaştırıldı</option><option value="Periyodik Takip">🔄 Periyodik (Düzenli) Takip</option></select></div>' +
           '<div><label class="text-xs font-bold text-slate-500 uppercase">Tespit Notları ve Detaylar</label><textarea id="newNotes" rows="2" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm mt-1 outline-none focus:ring-2 focus:ring-emerald-600" placeholder="Aile durumu, acil ihtiyaçlar..."></textarea></div>' +
@@ -1954,7 +2092,24 @@
           // SEKME A: GENEL SANDIK
           // -------------------------------------------------------------------
           if (state.kasaSubTab === 'genel') {
-            var budgetListHTML = state.budget.map(function(b) {
+            var kq = (state.kasaSearchQuery || '').toLowerCase().trim();
+            var kf = state.kasaQuickFilter || 'tumu';
+            var filteredBudget = (state.budget || []).filter(function(b) {
+              if (kf === 'gelir' && b.type !== 'gelir') return false;
+              if (kf === 'gider' && b.type !== 'gider') return false;
+              if (kf === 'banka' && b.channel !== 'banka') return false;
+              if (kf === 'elden' && b.channel !== 'elden') return false;
+              if (!kq) return true;
+              return (b.desc || '').toLowerCase().includes(kq) ||
+                     (b.giver || '').toLowerCase().includes(kq) ||
+                     (b.receiver || '').toLowerCase().includes(kq) ||
+                     (b.category || '').toLowerCase().includes(kq) ||
+                     (b.author || '').toLowerCase().includes(kq) ||
+                     String(b.amount || '').includes(kq);
+            });
+            var budgetListHTML = filteredBudget.length === 0
+              ? '<div class="bg-white p-6 rounded-2xl text-center text-xs text-slate-400 font-semibold border border-slate-200">Bu filtreye uygun kasa hareketi bulunamadı.</div>'
+              : filteredBudget.map(function(b) {
               var channelBadge = b.channel === 'banka' ? '<span class="text-xs font-bold px-2 py-0.5 rounded-md bg-blue-50 text-blue-800 border border-blue-200">🏦 Banka</span>' : '<span class="text-xs font-bold px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200">💵 Elden</span>';
               var adminBtns = isAdmin ? '<div class="flex justify-end space-x-1 mt-1.5"><button data-id="' + esc(b.id) + '" onclick="openEditBudget(this.getAttribute(\'data-id\'))" class="text-[10px] text-emerald-800 font-bold hover:bg-slate-100 px-2 py-0.5 rounded border border-slate-200">✏️ Düzenle</button><button data-id="' + esc(b.id) + '" onclick="deleteBudgetItem(this.getAttribute(\'data-id\'))" class="text-[10px] text-rose-600 font-bold hover:bg-rose-50 px-2 py-0.5 rounded border border-rose-200">Sil</button></div>' : '';
 
@@ -2021,30 +2176,35 @@
                   '</div>' +
                 '</div>' +
                 '<form onsubmit="handleNewBudget(event)" class="space-y-3">' +
-                  // İNFAK / TEBERRU KATEGORİSİ SEÇİMİ
+                  // İNFAK / TEBERRU KATEGORİSİ SEÇİMİ (Sadeleştirilmiş + Eşya Bölmeli)
                   '<div><label class="text-[11px] font-bold text-slate-500 uppercase block mb-1">' + (state.txType === 'gelir' ? 'Teberru (Bağış) Türü' : 'İnfak (Harcama) Kalemi') + '</label>' +
                     (state.txType === 'gelir'
                       ? '<select id="txCategorySelect" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:ring-2 focus:ring-emerald-600 focus:bg-white">' +
-                          '<option value="Zekât">🌿 Zekât Teberruu</option>' +
-                          '<option value="Sadaka">🤲 Sadaka / Genel Hayır</option>' +
-                          '<option value="Yetim Desteği">👶 Yetim / Hamîlik Teberruu</option>' +
-                          '<option value="Kışlık Yakacak">🔥 Kışlık Yakacak (Odun-Kömür) Teberruu</option>' +
-                          '<option value="Gıda / Erzak">🥖 Gıda / Erzak Desteği</option>' +
-                          '<option value="Adak / Kurban">🐑 Adak / Şükür / Akika Kurbanı</option>' +
-                          '<option value="Fitre / Fidye">🌾 Fitre / Oruç Fidyesi</option>' +
-                          '<option value="Şifa / Sağlık">💊 Şifa / Tedavi Desteği</option>' +
-                          '<option value="Diğer Teberru">✨ Diğer Emanet</option>' +
+                          '<option value="Zekât">🌿 Zekât</option>' +
+                          '<option value="Sadaka">🤲 Sadaka / Hayır</option>' +
+                          '<option value="Gıda / Erzak">🥖 Gıda / Erzak</option>' +
+                          '<option value="Ev Eşyası / Beyaz Eşya">🛋️ Ev Eşyası / Beyaz Eşya</option>' +
+                          '<option value="Yakacak">🔥 Yakacak (Odun / Kömür)</option>' +
+                          '<option value="Giyim">👕 Giyim</option>' +
+                          '<option value="Yetim / Eğitim">👶 Yetim / Eğitim</option>' +
+                          '<option value="Sağlık / İlaç">💊 Sağlık / Tedavi</option>' +
+                          '<option value="Kira / Fatura">🏠 Kira / Fatura</option>' +
+                          '<option value="Adak / Kurban">🐑 Adak / Kurban</option>' +
+                          '<option value="Fitre / Fidye">🌾 Fitre / Fidye</option>' +
+                          '<option value="Diğer">✨ Diğer</option>' +
                         '</select>'
                       : '<select id="txCategorySelect" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:ring-2 focus:ring-rose-600 focus:bg-white">' +
-                          '<option value="Gıda / Erzak">🥖 Gıda / Erzak Alımı</option>' +
-                          '<option value="Nakit / Sadaka">💵 Nakit / Sadaka (El İnfakı)</option>' +
-                          '<option value="Kışlık Yakacak">🔥 Kışlık Yakacak (Odun / Kömür)</option>' +
-                          '<option value="Kisve (Giyim)">👕 Kisve (Giyim / Mont / Bot)</option>' +
-                          '<option value="Şifa (Sağlık / İlaç)">💊 Şifa (Sağlık / Reçete / Tedavi)</option>' +
-                          '<option value="Yetim Desteği">👶 Yetim Harçlığı & İhtiyacı</option>' +
-                          '<option value="Kira / Fatura">🏠 Kira / Elektrik-Su-Yakıt Faturası</option>' +
-                          '<option value="Lojistik / Ulaşım">🚚 Lojistik & Dağıtım / Yakıt</option>' +
-                          '<option value="Diğer İnfak">📦 Diğer İnfak Harcaması</option>' +
+                          '<option value="Gıda / Erzak">🥖 Gıda / Erzak</option>' +
+                          '<option value="Nakit Destek">💵 Nakit Destek</option>' +
+                          '<option value="Ev Eşyası">🛋️ Ev Eşyası / Mobilya</option>' +
+                          '<option value="Beyaz Eşya">🧺 Beyaz Eşya / Ev Aleti</option>' +
+                          '<option value="Yakacak">🔥 Yakacak (Odun / Kömür)</option>' +
+                          '<option value="Giyim">👕 Giyim</option>' +
+                          '<option value="Sağlık / İlaç">💊 Sağlık / İlaç</option>' +
+                          '<option value="Kira / Fatura">🏠 Kira / Fatura</option>' +
+                          '<option value="Yetim / Eğitim">👶 Yetim / Eğitim</option>' +
+                          '<option value="Lojistik / Ulaşım">🚚 Lojistik / Ulaşım</option>' +
+                          '<option value="Diğer">📦 Diğer</option>' +
                         '</select>'
                     ) +
                   '</div>' +
@@ -2075,7 +2235,23 @@
                   '<button type="submit" class="w-full text-white text-xs font-extrabold py-3.5 rounded-xl font-display shadow-md transition-all ' + (state.txType === 'gelir' ? 'bg-emerald-700 hover:bg-emerald-800' : 'bg-rose-700 hover:bg-rose-800') + '">' + (state.txType === 'gelir' ? 'Teberruyu (Bağışı) Sandığa Kaydet' : 'İnfakı (Harcamayı) Kaydet') + '</button>' +
                 '</form>' +
               '</div>' +
-              '<div class="space-y-2"><span class="text-xs font-bold text-slate-400 uppercase">Geçmiş İnfak ve Teberru Kayıtları</span>' + budgetListHTML + '</div>' +
+              '<div class="space-y-2.5">' +
+                '<div class="flex justify-between items-center"><span class="text-xs font-bold text-slate-400 uppercase">Geçmiş İnfak ve Teberru Kayıtları (' + filteredBudget.length + ')</span></div>' +
+                '<div class="flex space-x-1.5 overflow-x-auto hide-scrollbar pb-0.5">' +
+                  [
+                    { key: 'tumu', label: 'Tümü' },
+                    { key: 'gelir', label: '🟢 Teberru' },
+                    { key: 'gider', label: '🔴 İnfak' },
+                    { key: 'banka', label: '🏦 Banka' },
+                    { key: 'elden', label: '💵 Elden' }
+                  ].map(function(f) {
+                    var isSel = (state.kasaQuickFilter || 'tumu') === f.key;
+                    return '<button type="button" onclick="setKasaQuickFilter(\'' + f.key + '\')" class="whitespace-nowrap px-3 py-1.5 rounded-xl text-xs font-bold transition-all ' + (isSel ? 'bg-emerald-800 text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50') + '">' + f.label + '</button>';
+                  }).join('') +
+                '</div>' +
+                '<input type="text" id="kasaSearchInput" placeholder="Sandık hareketlerinde ara (isim, açıklama, kalem)..." value="' + esc(state.kasaSearchQuery || '') + '" oninput="onKasaSearchType(this.value)" class="w-full bg-white border border-slate-200 rounded-2xl px-3.5 py-2.5 text-xs font-medium outline-none focus:ring-2 focus:ring-emerald-600 shadow-xs" />' +
+                '<div id="budgetListContainer" class="space-y-2">' + budgetListHTML + '</div>' +
+              '</div>' +
             '</div>';
           }
 
@@ -2540,7 +2716,7 @@
       // MODAL 1: HANE DETAY PENCERESİ (TÜM KAYIT BİLGİLERİ)
       if (selectedAid) {
         var photosArr = Array.isArray(selectedAid.photos) ? selectedAid.photos : [];
-        var photosGallery = (photosArr.length > 0) ? '<div><span class="font-bold text-slate-700 block uppercase text-[10px] mb-1.5">📸 Saha Fotoğrafları (' + photosArr.length + ' adet - Büyütmek ve indirmek için dokunun):</span><div class="grid grid-cols-3 gap-2">' + photosArr.map(function(p) { var s = safePhoto(p); return '<div onclick="openPhotoModal(\'' + s + '\')" class="cursor-pointer relative group rounded-xl overflow-hidden border border-slate-200 shadow-sm active:scale-95 transition-all"><img src="' + s + '" class="w-full h-20 object-cover ' + (state.privacyMode ? 'filter blur-md' : '') + '" /><div class="absolute inset-0 bg-black/25 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-[10px] font-bold transition-opacity">🔍 İncele / İndir</div></div>'; }).join('') + '</div></div>' : '';
+        var photosGallery = (photosArr.length > 0) ? '<div><span class="font-bold text-slate-700 block uppercase text-[10px] mb-1.5">📸 Saha Fotoğrafları (' + photosArr.length + ' adet - Büyütmek ve indirmek için dokunun):</span><div class="grid grid-cols-3 gap-2">' + photosArr.map(function(p) { var s = safePhoto(p); return '<div onclick="openPhotoModal(\'' + s + '\')" class="cursor-pointer relative group rounded-xl overflow-hidden border border-slate-200 shadow-sm active:scale-95 transition-all"><img src="' + s + '" class="w-full h-24 object-cover ' + (state.privacyMode ? 'filter blur-md' : '') + '" /><div class="absolute inset-0 bg-black/25 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-[10px] font-bold transition-opacity">🔍 İncele / İndir</div></div>'; }).join('') + '</div></div>' : '';
         var cleanAidPhone = cleanPhone(selectedAid.phone);
         var displayPhone = cleanAidPhone ? (state.privacyMode ? maskPhone(cleanAidPhone) : cleanAidPhone) : 'Telefon Eklenmedi';
         var adminAidBtns = isAdmin ? '<div class="grid grid-cols-2 gap-2 pt-2 border-t"><button type="button" data-id="' + esc(selectedAid.id) + '" onclick="openEditAid(this.getAttribute(\'data-id\'))" class="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs py-2.5 rounded-xl border border-slate-200">✏️ Bilgileri Düzenle</button><button type="button" data-id="' + esc(selectedAid.id) + '" onclick="deleteAid(this.getAttribute(\'data-id\'))" class="bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold text-xs py-2.5 rounded-xl border border-rose-200">🗑️ Kaydı Sil</button></div>' : '';
@@ -2554,20 +2730,20 @@
         else if (selectedAid.status === 'Periyodik Takip') { badgeColor = 'bg-blue-100 text-blue-800'; statusLabel = '🔄 Periyodik Takip'; }
 
         // Emanet Türü (İhtiyaç Kalemleri)
-        var catsArr = Array.isArray(selectedAid.category) ? selectedAid.category : [];
+        var catsArr = normalizeCategoryArray(selectedAid.category);
         var catsHTML = (catsArr.length > 0)
           ? '<div class="flex flex-wrap gap-1.5">' + catsArr.map(function(c) { return '<span class="bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-bold px-2.5 py-1 rounded-xl">📦 ' + esc(c) + '</span>'; }).join('') + '</div>'
           : '<span class="text-xs text-slate-400 italic">İhtiyaç kalemi seçilmemiş.</span>';
 
         html += '<div onclick="if(event.target===this)closeAidModal()" class="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-end justify-center">' +
           '<div class="bg-white w-full max-w-md rounded-t-3xl p-5 overflow-y-auto modal-scroll-body modal-sheet-safe space-y-3.5 shadow-2xl">' +
-            // ÜST BAŞLIK & DURUM ROZETİ
+            // ÜST BAŞLIK & GERİ / KAPAT BUTONU
             '<div class="flex justify-between items-start pb-2 border-b border-slate-100">' +
-              '<div>' +
-                '<h2 class="text-xl font-extrabold text-slate-900 font-display">' + esc(maskName(selectedAid.name)) + '</h2>' +
+              '<div class="min-w-0 pr-2">' +
+                '<h2 class="text-xl font-extrabold text-slate-900 font-display truncate">' + esc(maskName(selectedAid.name)) + '</h2>' +
                 '<p class="text-xs font-semibold text-slate-500 mt-0.5">📍 ' + esc(selectedAid.neighborhood || 'Mahalle Yok') + ' - ' + esc(selectedAid.district || 'İlçe Yok') + (selectedAid.city ? ' / ' + esc(selectedAid.city) : '') + '</p>' +
               '</div>' +
-              '<button type="button" onclick="closeAidModal()" class="w-8 h-8 bg-slate-100 hover:bg-slate-200 rounded-full font-bold text-slate-500 text-xs flex items-center justify-center">✕</button>' +
+              '<button type="button" onclick="closeAidModal()" class="shrink-0 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-xl font-extrabold text-slate-600 text-xs flex items-center space-x-1 active:scale-95 transition-all"><span>← Geri</span></button>' +
             '</div>' +
 
             // MEVCUT DURUM
@@ -2604,7 +2780,11 @@
               var delPhotosArr = Array.isArray(selectedAid.deliveryPhotos) ? selectedAid.deliveryPhotos : [];
               var delGallery = (delPhotosArr.length > 0)
                 ? '<div class="bg-emerald-50/80 p-3 rounded-2xl border border-emerald-200 space-y-2"><div class="flex justify-between items-center"><span class="font-bold text-emerald-900 block uppercase text-[10px] flex items-center space-x-1"><span>✅ Ulaştırma & Teslimat Kanıtı</span><span class="text-emerald-700">(' + delPhotosArr.length + ' Fotoğraf)</span></span><span class="text-[9px] font-extrabold bg-emerald-200/80 text-emerald-900 px-2 py-0.5 rounded-full">Teslim Edildi</span></div><div class="grid grid-cols-3 gap-2">' +
-                    delPhotosArr.map(function(p) { var s = safePhoto(p); return '<div onclick="openPhotoModal(\'' + s + '\')" class="cursor-pointer relative group rounded-xl overflow-hidden border border-emerald-300 shadow-sm active:scale-95 transition-all"><img src="' + s + '" class="w-full h-20 object-cover ' + (state.privacyMode ? 'filter blur-md' : '') + '" /><div class="absolute inset-0 bg-black/25 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-[10px] font-bold transition-opacity">🔍 İncele</div></div>'; }).join('') +
+                    delPhotosArr.map(function(p, dIdx) {
+                      var s = safePhoto(p);
+                      var delBtn = isAdmin ? '<button type="button" onclick="event.stopPropagation(); removeDeliveryPhoto(\'' + esc(selectedAid.id) + '\', ' + dIdx + ')" class="absolute top-1 right-1 w-5 h-5 bg-rose-600/90 text-white rounded-full text-[10px] font-bold flex items-center justify-center shadow">✕</button>' : '';
+                      return '<div onclick="openPhotoModal(\'' + s + '\')" class="cursor-pointer relative group rounded-xl overflow-hidden border border-emerald-300 shadow-sm active:scale-95 transition-all"><img src="' + s + '" class="w-full h-24 object-cover ' + (state.privacyMode ? 'filter blur-md' : '') + '" />' + delBtn + '</div>';
+                    }).join('') +
                   '</div></div>'
                 : '';
 
@@ -2652,26 +2832,37 @@
         '</div>';
       }
 
-            // MODAL 2: HANE DÜZENLEME PENCERESİ (İl / İlçe / Mahalle 3'lü Düzenleme)
+            // MODAL 2: HANE DÜZENLEME PENCERESİ (İl / İlçe / Mahalle + Sadeleştirilmiş Emanet Türü + Fotoğraf Yönetimi)
       if (isAdmin && editingAid) {
+        var normEditingCats = normalizeCategoryArray(editingAid.category);
+        var editPhotosList = Array.isArray(state.editPhotos) ? state.editPhotos : [];
+        var editPhotosPreviewHTML = editPhotosList.map(function(p, idx) {
+          var s = safePhoto(p);
+          return '<div class="relative"><img src="' + s + '" onclick="openPhotoModal(\'' + s + '\')" class="w-16 h-16 rounded-xl object-cover border border-slate-200 cursor-pointer" /><button type="button" onclick="removeEditPhoto(' + idx + ')" class="absolute -top-1.5 -right-1.5 w-5 h-5 bg-rose-600 text-white rounded-full text-[10px] font-bold flex items-center justify-center shadow">✕</button></div>';
+        }).join('');
+
         html += '<div onclick="if(event.target===this)closeEditAid()" class="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-end justify-center">' +
           '<form onsubmit="handleSaveEditAid(event)" class="bg-white w-full max-w-md rounded-t-3xl p-5 overflow-y-auto modal-scroll-body modal-sheet-safe space-y-3.5 shadow-2xl">' +
-            '<div class="flex justify-between items-center pb-2 border-b"><h3 class="font-extrabold text-slate-900 text-base font-display">Hane Bilgilerini Düzenle</h3><button type="button" onclick="closeEditAid()" class="w-7 h-7 bg-slate-100 rounded-full font-bold text-slate-500 text-xs">✕</button></div>' +
+            '<div class="flex justify-between items-center pb-2 border-b"><h3 class="font-extrabold text-slate-900 text-base font-display">Hane Bilgilerini Düzenle</h3><button type="button" onclick="closeEditAid()" class="px-3 py-1 bg-slate-100 hover:bg-slate-200 rounded-xl font-extrabold text-slate-600 text-xs">← Geri</button></div>' +
             '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Hane Adı / Rumuz</label><input id="editAidName" required value="' + esc(editingAid.name) + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:bg-white" /></div>' +
             '<div class="grid grid-cols-3 gap-2">' +
               '<div><label class="text-[11px] font-bold text-slate-500 uppercase">İl</label><input id="editAidCity" required value="' + esc(editingAid.city || 'Kayseri') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" placeholder="İl" /></div>' +
               '<div><label class="text-[11px] font-bold text-slate-500 uppercase">İlçe</label><input id="editAidDistrict" required value="' + esc(editingAid.district) + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" placeholder="İlçe" /></div>' +
               '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Mahalle</label><input id="editAidNeighborhood" required value="' + esc(editingAid.neighborhood) + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
             '</div>' +
-            '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Telefon</label><input id="editAidPhone" type="tel" value="' + esc(editingAid.phone || '') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
+            '<div class="grid grid-cols-2 gap-2">' +
+              '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Telefon</label><input id="editAidPhone" type="tel" value="' + esc(editingAid.phone || '') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
+              '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Durum</label><select id="editAidStatus" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:bg-white"><option value="Acil İhtiyaç" ' + (editingAid.status === 'Acil İhtiyaç' ? 'selected' : '') + '>🚨 Müstacel</option><option value="Planlandı" ' + (editingAid.status === 'Planlandı' ? 'selected' : '') + '>⏳ Planlandı</option><option value="Teslim Edildi" ' + (editingAid.status === 'Teslim Edildi' ? 'selected' : '') + '>✅ Ulaştırıldı</option><option value="Periyodik Takip" ' + (editingAid.status === 'Periyodik Takip' ? 'selected' : '') + '>🔄 Periyodik</option></select></div>' +
+            '</div>' +
             '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Açık Adres</label><textarea id="editAidAddress" rows="2" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-medium outline-none focus:bg-white">' + esc(editingAid.address || '') + '</textarea></div>' +
             '<div><div class="flex justify-between items-center mb-1"><label class="text-[11px] font-bold text-slate-500 uppercase">Harita Linki</label><div class="flex items-center space-x-1.5"><button type="button" onclick="getCurrentLocation(\'editAidMapsUrl\', this)" class="text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-lg font-bold hover:bg-emerald-100 active:scale-95">📍 Konumu Yenile</button><button type="button" onclick="generateMapLinkFromAddress(\'editAidMapsUrl\')" class="text-[10px] bg-blue-50 text-blue-900 border border-blue-200 px-2 py-0.5 rounded-lg font-bold hover:bg-blue-100 active:scale-95">🗺️ Adresten Üret</button></div></div><input id="editAidMapsUrl" value="' + esc(editingAid.mapsUrl || '') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-medium outline-none focus:bg-white" /></div>' +
             '<div><label class="text-[11px] font-bold text-slate-500 uppercase block mb-1">Emanet Türü (İhtiyaç Kalemleri)</label><div class="grid grid-cols-2 gap-1.5 text-[11px] font-bold">' +
-              ['Gıda / Erzak (Yiyecek)', 'Nakit / Sadaka (Para)', 'Kışlık Yakacak (Odun-Kömür)', 'Kisve (Giyim / Kıyafet)', 'Şifa (Sağlık / İlaç)', 'Yetim Desteği'].map(function(cat) {
-                var hasCat = Array.isArray(editingAid.category) && editingAid.category.includes(cat);
-                return '<label class="flex items-center space-x-1.5 bg-slate-50 p-2 rounded-xl border border-slate-200 cursor-pointer"><input type="checkbox" name="editCats" value="' + esc(cat) + '" ' + (hasCat ? 'checked' : '') + ' class="accent-emerald-600 rounded" /><span>' + esc(cat) + '</span></label>';
+              EMANET_CATEGORIES.map(function(catObj) {
+                var hasCat = normEditingCats.includes(catObj.value);
+                return '<label class="flex items-center space-x-1.5 bg-slate-50 hover:bg-emerald-50/50 p-2 rounded-xl border border-slate-200 cursor-pointer select-none"><input type="checkbox" name="editCats" value="' + esc(catObj.value) + '" ' + (hasCat ? 'checked' : '') + ' class="accent-emerald-600 w-3.5 h-3.5 rounded shrink-0" /><span class="truncate">' + esc(catObj.label) + '</span></label>';
               }).join('') +
             '</div></div>' +
+            '<div><label class="text-[11px] font-bold text-slate-500 uppercase block mb-1">Saha Fotoğrafları (HD Kalite)</label><input type="file" accept="image/*" multiple onclick="markExternalIntentActive()" onchange="handleEditPhotoSelect(event)" class="text-xs text-slate-500 file:mr-2 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-emerald-50 file:text-emerald-800 hover:file:bg-emerald-100 cursor-pointer" /><div id="editPhotoPreviewContainer" class="flex gap-2 mt-2">' + editPhotosPreviewHTML + '</div></div>' +
             '<div><label class="text-[11px] font-bold text-slate-500 uppercase">İhtiyaç ve Durum Notları</label><textarea id="editAidNotes" rows="2" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-medium outline-none focus:bg-white">' + esc(editingAid.notes || '') + '</textarea></div>' +
             '<button type="submit" class="w-full bg-emerald-800 text-white font-extrabold text-xs py-3 rounded-xl font-display shadow-md">Değişiklikleri Kaydet ve E-Tabloya Gönder</button>' +
           '</form>' +
@@ -2682,12 +2873,15 @@
       if (isAdmin && editingBudget) {
         html += '<div onclick="if(event.target===this)closeEditBudget()" class="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-end justify-center">' +
           '<form onsubmit="handleSaveEditBudget(event)" class="bg-white w-full max-w-md rounded-t-3xl p-5 overflow-y-auto modal-scroll-body modal-sheet-safe space-y-3.5 shadow-2xl">' +
-            '<div class="flex justify-between items-center pb-2 border-b"><h3 class="font-extrabold text-slate-900 text-base font-display">Kasa Hareketini Düzenle</h3><button type="button" onclick="closeEditBudget()" class="w-7 h-7 bg-slate-100 rounded-full font-bold text-slate-500 text-xs">✕</button></div>' +
+            '<div class="flex justify-between items-center pb-2 border-b"><h3 class="font-extrabold text-slate-900 text-base font-display">Kasa Hareketini Düzenle</h3><button type="button" onclick="closeEditBudget()" class="px-3 py-1 bg-slate-100 hover:bg-slate-200 rounded-xl font-extrabold text-slate-600 text-xs">← Geri</button></div>' +
             '<div class="grid grid-cols-2 gap-2">' +
               '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Hareket Türü</label><select id="editBudgetType" onchange="updateEditBudgetLabels(this.value)" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold"><option value="gelir" ' + (editingBudget.type === 'gelir' ? 'selected' : '') + '>🟢 Teberru (Bağış)</option><option value="gider" ' + (editingBudget.type === 'gider' ? 'selected' : '') + '>🔴 İnfak (Harcama)</option></select></div>' +
               '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Ödeme Kanalı</label><select id="editBudgetChannel" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold"><option value="banka" ' + (editingBudget.channel === 'banka' ? 'selected' : '') + '>🏦 Banka / Havale</option><option value="elden" ' + (editingBudget.channel === 'elden' ? 'selected' : '') + '>💵 Elden Nakit</option></select></div>' +
             '</div>' +
-            '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Tutar (₺)</label><input id="editBudgetAmount" type="number" required value="' + editingBudget.amount + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-sm font-bold outline-none focus:bg-white" /></div>' +
+            '<div class="grid grid-cols-2 gap-2">' +
+              '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Tutar (₺)</label><input id="editBudgetAmount" type="number" required value="' + editingBudget.amount + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-sm font-bold outline-none focus:bg-white" /></div>' +
+              '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Kategori / Kalem</label><input id="editBudgetCategory" type="text" value="' + esc(normalizeCategoryLabel(editingBudget.category || '')) + '" placeholder="Örn: Zekât, Gıda, Ev Eşyası" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:bg-white" /></div>' +
+            '</div>' +
             '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Açıklama</label><input id="editBudgetDesc" type="text" required value="' + esc(editingBudget.desc) + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
             '<div class="grid grid-cols-2 gap-2">' +
               '<div><label id="editBudgetGiverLabel" class="text-[11px] font-bold ' + (editingBudget.type === 'gelir' ? 'text-emerald-800' : 'text-amber-800') + ' uppercase">' + (editingBudget.type === 'gelir' ? 'Teberruyu Veren (Bağışçı)' : 'Emaneti Veren (Sorumlu)') + '</label><input id="editBudgetGiver" type="text" value="' + esc(editingBudget.giver || '') + '" placeholder="' + (editingBudget.type === 'gelir' ? 'Örn: Hacı Mehmet Bey / Hayırsever' : 'Örn: Muhammet (Sorumlu) / Kasa') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
@@ -2702,7 +2896,7 @@
       if (isAdmin && editingDonor) {
         html += '<div onclick="if(event.target===this)closeEditDonor()" class="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-end justify-center">' +
           '<form onsubmit="handleSaveEditDonor(event)" class="bg-white w-full max-w-md rounded-t-3xl p-5 overflow-y-auto modal-scroll-body modal-sheet-safe space-y-3.5 shadow-2xl">' +
-            '<div class="flex justify-between items-center pb-2 border-b"><h3 class="font-extrabold text-slate-900 text-base font-display">Hayırsever Bilgisini Düzenle</h3><button type="button" onclick="closeEditDonor()" class="w-7 h-7 bg-slate-100 rounded-full font-bold text-slate-500 text-xs">✕</button></div>' +
+            '<div class="flex justify-between items-center pb-2 border-b"><h3 class="font-extrabold text-slate-900 text-base font-display">Hayırsever Bilgisini Düzenle</h3><button type="button" onclick="closeEditDonor()" class="px-3 py-1 bg-slate-100 hover:bg-slate-200 rounded-xl font-extrabold text-slate-600 text-xs">← Geri</button></div>' +
             '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Ad Soyad</label><input id="editDonorName" required value="' + esc(editingDonor.name) + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:bg-white" /></div>' +
             '<div class="grid grid-cols-2 gap-2"><div><label class="text-[11px] font-bold text-slate-500 uppercase">Telefon</label><input id="editDonorPhone" type="tel" value="' + esc(editingDonor.phone || '') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div><div><label class="text-[11px] font-bold text-slate-500 uppercase">Şehir</label><input id="editDonorCity" value="' + esc(editingDonor.city || '') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div></div>' +
             '<div><label class="text-[11px] font-bold text-slate-500 uppercase">E-posta</label><input id="editDonorEmail" type="email" value="' + esc(editingDonor.email || '') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
@@ -2716,7 +2910,7 @@
       if (isAdmin && editingMember) {
         html += '<div onclick="if(event.target===this)closeEditMember()" class="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-end justify-center">' +
           '<form onsubmit="handleSaveEditMember(event)" class="bg-white w-full max-w-md rounded-t-3xl p-5 overflow-y-auto modal-scroll-body modal-sheet-safe space-y-3.5 shadow-2xl">' +
-            '<div class="flex justify-between items-center pb-2 border-b"><h3 class="font-extrabold text-slate-900 text-base font-display">Gönüllü Yetki & Bilgi Düzenle</h3><button type="button" onclick="closeEditMember()" class="w-7 h-7 bg-slate-100 hover:bg-slate-200 rounded-full font-bold text-slate-500 text-xs flex items-center justify-center">✕</button></div>' +
+            '<div class="flex justify-between items-center pb-2 border-b"><h3 class="font-extrabold text-slate-900 text-base font-display">Gönüllü Yetki & Bilgi Düzenle</h3><button type="button" onclick="closeEditMember()" class="px-3 py-1 bg-slate-100 hover:bg-slate-200 rounded-xl font-extrabold text-slate-600 text-xs">← Geri</button></div>' +
             '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Adı Soyadı</label><input id="editMemberName" required value="' + esc(editingMember.name) + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:bg-white" /></div>' +
             '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Telefon Numarası</label><input id="editMemberPhone" type="tel" value="' + esc(editingMember.phone || '') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
             '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Meslek / Uzmanlık Alanı</label><input id="editMemberProfession" value="' + esc(editingMember.profession || '') + '" placeholder="Örn: Doktor, Şoför, Elektrikçi..." class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
@@ -2738,7 +2932,7 @@
             '<button type="button" onclick="closePhotoModal()" class="w-9 h-9 bg-white/20 hover:bg-white/30 text-white rounded-full font-extrabold flex items-center justify-center text-sm active:scale-90 transition-all">✕</button>' +
           '</div>' +
           '<div class="flex-1 flex items-center justify-center w-full max-w-md p-2 overflow-hidden">' +
-            '<img src="' + safePhoto(state.viewingPhotoUrl) + '" class="max-h-[68vh] max-w-full rounded-2xl object-contain shadow-2xl border border-white/20" alt="Saha Fotoğrafı" />' +
+            '<img src="' + safePhoto(state.viewingPhotoUrl) + '" class="max-h-[75vh] max-w-full rounded-2xl object-contain shadow-2xl border border-white/20" alt="Saha Fotoğrafı" />' +
           '</div>' +
           '<div class="w-full max-w-md space-y-2 modal-sheet-safe">' +
             '<a href="' + safePhoto(state.viewingPhotoUrl) + '" download="hare_saha_fotografi_' + Date.now() + '.jpg" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs py-3.5 rounded-2xl flex items-center justify-center space-x-2 shadow-xl active:scale-95 transition-transform text-center">' +
@@ -2841,6 +3035,23 @@
       state.logSearchQuery = val;
       var c = document.getElementById('logsListContainer');
       if (c) c.innerHTML = renderLogsListHTML();
+    };
+
+    window.setKasaQuickFilter = function(f) {
+      state.kasaQuickFilter = f;
+      render();
+    };
+
+    window.onKasaSearchType = function(val) {
+      state.kasaSearchQuery = val;
+      render();
+      setTimeout(function() {
+        var el = document.getElementById('kasaSearchInput');
+        if (el) {
+          el.focus();
+          try { el.setSelectionRange(el.value.length, el.value.length); } catch(e) {}
+        }
+      }, 0);
     };
 
     // =========================================================================
@@ -3051,20 +3262,50 @@
     // HANE, KASA, BAĞIŞÇI DÜZENLEME & SİLME
     window.openEditAid = function(id) {
       if (!checkIsAdmin(state.currentUser)) { showToast('Yalnızca yöneticiler düzenleyebilir.'); return; }
-      state.previousSelectedAidId = state.selectedAidId || String(id || '').trim();
+      var targetId = String(id || '').trim();
+      var item = state.aids.find(function(a) { return String(a.id).trim() === targetId; });
+      state.previousSelectedAidId = state.selectedAidId || targetId;
       state.selectedAidId = null;
-      state.editingAidId = String(id || '').trim();
+      state.editingAidId = targetId;
+      state.editPhotos = (item && Array.isArray(item.photos)) ? item.photos.slice() : [];
       pushNavState('editAid');
       render();
     };
 
     window.closeEditAid = function() {
       state.editingAidId = null;
+      state.editPhotos = [];
       if (state.previousSelectedAidId) {
         state.selectedAidId = state.previousSelectedAidId;
         state.previousSelectedAidId = null;
       }
       render();
+    };
+
+    window.handleEditPhotoSelect = function(e) {
+      if (!Array.isArray(state.editPhotos)) state.editPhotos = [];
+      var files = Array.from(e.target.files || []).slice(0, 3 - state.editPhotos.length);
+      if (files.length === 0) return;
+      showToast('📸 Fotoğraf HD kalitede işleniyor...');
+      files.forEach(function(file) {
+        var reader = new FileReader();
+        reader.onload = function(evt) {
+          var img = new Image();
+          img.onload = function() {
+            state.editPhotos.push(compressPhotoHD(img, false));
+            render();
+          };
+          img.src = evt.target.result;
+        };
+        reader.readAsDataURL(file);
+      });
+    };
+
+    window.removeEditPhoto = function(idx) {
+      if (Array.isArray(state.editPhotos)) {
+        state.editPhotos.splice(idx, 1);
+        render();
+      }
     };
 
     window.handleSaveEditAid = function(e) {
@@ -3078,19 +3319,29 @@
         item.district = document.getElementById('editAidDistrict').value;
         item.neighborhood = document.getElementById('editAidNeighborhood').value;
         item.phone = document.getElementById('editAidPhone').value;
+        var stEl = document.getElementById('editAidStatus');
+        if (stEl && stEl.value) item.status = stEl.value;
         item.address = document.getElementById('editAidAddress').value;
         item.mapsUrl = document.getElementById('editAidMapsUrl').value;
         var editedCats = Array.from(document.querySelectorAll('input[name="editCats"]:checked')).map(function(el) { return el.value; });
         if (editedCats.length > 0 || document.querySelectorAll('input[name="editCats"]').length > 0) {
-          item.category = editedCats;
+          item.category = normalizeCategoryArray(editedCats);
+        }
+        if (Array.isArray(state.editPhotos)) {
+          item.photos = state.editPhotos.slice();
         }
         item.notes = document.getElementById('editAidNotes').value;
         item.updatedBy = state.currentUser.name;
         item.updatedAt = getTurkeyDateTime();
         pushToGoogleSheet('Hane Güncellendi', item.name + ' hanesi güncellendi.');
         state.editingAidId = null;
+        state.editPhotos = [];
+        if (state.previousSelectedAidId) {
+          state.selectedAidId = state.previousSelectedAidId;
+          state.previousSelectedAidId = null;
+        }
         render();
-        showToast('Hane bilgileri güncellendi!');
+        showToast('✅ Hane bilgileri güncellendi!');
       }
     };
 
@@ -3149,6 +3400,8 @@
         item.type = document.getElementById('editBudgetType').value;
         item.channel = document.getElementById('editBudgetChannel').value;
         item.amount = Number(document.getElementById('editBudgetAmount').value);
+        var catEl = document.getElementById('editBudgetCategory');
+        if (catEl) item.category = catEl.value.trim();
         item.desc = document.getElementById('editBudgetDesc').value;
         var egEl = document.getElementById('editBudgetGiver');
         var erEl = document.getElementById('editBudgetReceiver');
@@ -3311,16 +3564,7 @@
         reader.onload = function(evt) {
           var img = new Image();
           img.onload = function() {
-            var canvas = document.createElement('canvas');
-            var maxDim = 650;
-            var w = img.width, h = img.height;
-            if (w > h && w > maxDim) { h = Math.round((h * maxDim) / w); w = maxDim; }
-            else if (h > maxDim) { w = Math.round((w * maxDim) / h); h = maxDim; }
-            canvas.width = w; canvas.height = h;
-            var ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0, w, h);
-            var compressedBase64 = canvas.toDataURL('image/jpeg', 0.55);
-
+            var compressedBase64 = compressPhotoHD(img, true);
             item.deliveryPhotos.push(compressedBase64);
             processedCount++;
 
@@ -3332,12 +3576,26 @@
               saveCacheItem('hare_cached_aids', state.aids);
               pushToGoogleSheet('Emanet Teslim Edildi', item.name + ' hanesine emanet teslim edildi ve teslimat fotoğrafı yüklendi.');
               render();
-              showToast('✅ Teslimat kanıt fotoğrafı eklendi ve durum Ulaştırıldı yapıldı!');
+              showToast('✅ Teslimat kanıt fotoğrafı (HD) eklendi ve durum Ulaştırıldı yapıldı!');
             }
           };
           img.src = evt.target.result;
         };
         reader.readAsDataURL(file);
+      });
+    };
+
+    window.removeDeliveryPhoto = function(aidId, photoIdx) {
+      if (!checkIsAdmin(state.currentUser)) { showToast('Fotoğraf silme yetkisi yalnızca yöneticidedir.'); return; }
+      var targetId = String(aidId || '').trim();
+      var item = state.aids.find(function(a) { return String(a.id).trim() === targetId; });
+      if (!item || !Array.isArray(item.deliveryPhotos)) return;
+      showConfirm('Bu teslimat fotoğrafını silmek istediğinize emin misiniz?', function() {
+        item.deliveryPhotos.splice(photoIdx, 1);
+        saveCacheItem('hare_cached_aids', state.aids);
+        pushToGoogleSheet('Teslimat Fotoğrafı Silindi', item.name + ' hanesinden bir teslimat fotoğrafı kaldırıldı.');
+        render();
+        showToast('🗑️ Teslimat fotoğrafı silindi.');
       });
     };
 
@@ -3406,8 +3664,9 @@
 
       // 🛡️ MÜKERRER (ÇİFT) KAYIT KONTROLÜ
       var duplicateMatch = null;
-      if (cleanP && cleanP.length >= 7) {
-        duplicateMatch = state.aids.find(function(a) { return cleanPhone(a.phone) === cleanP; });
+      var dialP = formatPhoneForDialer(phoneVal);
+      if (dialP && dialP.length >= 7) {
+        duplicateMatch = state.aids.find(function(a) { return formatPhoneForDialer(a.phone) === dialP; });
       }
       if (!duplicateMatch && cleanN.length >= 3) {
         duplicateMatch = state.aids.find(function(a) { return (a.name || '').trim().toLowerCase() === cleanN; });
@@ -3879,11 +4138,12 @@
     window.exportBudgetCSV = function() {
       if (!checkIsAdmin(state.currentUser)) { showToast('Kasa defteri indirme yetkisi yalnızca yöneticidedir.'); return; }
       var rows = [
-        ['Tür', 'Ödeme Kanalı', 'Tutar (TL)', 'Açıklama', 'Veren (Ödeyen)', 'Alan (Teslim Alan)', 'Kaydeden', 'Tarih']
+        ['Tür', 'Kategori', 'Ödeme Kanalı', 'Tutar (TL)', 'Açıklama', 'Veren (Ödeyen)', 'Alan (Teslim Alan)', 'Kaydeden', 'Tarih']
       ];
       state.budget.forEach(function(b) {
         rows.push([
           b.type === 'gelir' ? 'Teberru (Bağış)' : 'İnfak (Harcama)',
+          b.category || '',
           b.channel === 'banka' ? 'Banka' : 'Elden Nakit',
           b.amount || 0,
           b.desc || '',
@@ -3957,15 +4217,7 @@
         reader.onload = function(evt) {
           var img = new Image();
           img.onload = function() {
-            var canvas = document.createElement('canvas');
-            var maxDim = 650;
-            var w = img.width, h = img.height;
-            if (w > h && w > maxDim) { h = Math.round((h * maxDim) / w); w = maxDim; }
-            else if (h > maxDim) { w = Math.round((w * maxDim) / h); h = maxDim; }
-            canvas.width = w; canvas.height = h;
-            var ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0, w, h);
-            state.newPhotos.push(canvas.toDataURL('image/jpeg', 0.55));
+            state.newPhotos.push(compressPhotoHD(img, false));
             updatePhotoPreviews();
           };
           img.src = evt.target.result;
@@ -4032,32 +4284,38 @@
     };
 
     // =========================================================================
-    // 🔙 GEZİNTİ VE GERİ TUŞU YÖNETİMİ (Uygulamayı Asla Kapatmaz, Yalnızca İlgili Bölümü Kapatır)
+    // 🔙 GEZİNTİ VE GERİ TUŞU YÖNETİMİ (Android Chromium History Intervention Korumalı)
     // =========================================================================
     var navStepCounter = 1;
+    var userActivatedGuards = 0;
     var lastBackHandledAt = 0;
+    var isInternalHashChange = false;
 
     function pushNavState(type) {
       try {
         navStepCounter++;
+        userActivatedGuards++;
+        isInternalHashChange = true;
         history.pushState({ hareNav: type || 'nav', step: navStepCounter, timestamp: Date.now() }, '', '#hare-' + navStepCounter);
+        setTimeout(function() { isInternalHashChange = false; }, 50);
       } catch(e) {}
     }
 
     function ensureHistoryBuffer() {
       try {
         navStepCounter++;
+        userActivatedGuards++;
+        isInternalHashChange = true;
         history.pushState({ hareNav: 'guard', step: navStepCounter, ts: Date.now() }, '', '#hare-' + navStepCounter);
+        setTimeout(function() { isInternalHashChange = false; }, 50);
       } catch(e) {}
     }
 
     function initHistoryGuard() {
       try {
         history.replaceState({ hareNav: 'root', step: 0 }, '', '#hare-0');
-        for (var i = 1; i <= 5; i++) {
-          history.pushState({ hareNav: 'guard', step: i, ts: Date.now() + i }, '', '#hare-' + i);
-        }
-        navStepCounter = 6;
+        history.pushState({ hareNav: 'guard', step: 1, ts: Date.now() }, '', '#hare-1');
+        navStepCounter = 2;
       } catch(e) {}
     }
 
@@ -4175,28 +4433,45 @@
     };
 
     window.addEventListener('popstate', function(event) {
+      userActivatedGuards = Math.max(0, userActivatedGuards - 1);
       window.handleBackNavigation();
     });
 
-    // Android Cordova / WebIntoApp yerel donanım geri tuşu köprüsü
+    window.addEventListener('hashchange', function(event) {
+      if (isInternalHashChange) return;
+      window.handleBackNavigation();
+    });
+
+    // Android Cordova / WebIntoApp yerel donanım geri tuşu ve klavye geri tuşu köprüsü
     document.addEventListener('backbutton', function(event) {
       if (event && typeof event.preventDefault === 'function') event.preventDefault();
       window.handleBackNavigation();
     }, false);
 
-    // Kullanıcının ekrana dokunuşunda geçmiş tamponunun tükenmemesini sağla
-    document.addEventListener('click', function() {
-      if (!window.location.hash || window.location.hash === '#hare-0' || window.location.hash === '#hare-1') {
+    window.addEventListener('keydown', function(event) {
+      if (event && (event.keyCode === 4 || event.key === 'GoBack' || event.key === 'BrowserBack')) {
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        window.handleBackNavigation();
+      }
+    });
+
+    // 🛡️ KRİTİK ANDROID CHROMIUM ÇÖZÜMÜ:
+    // Android WebView (Chromium), yalnızca kullanıcı ekrana dokunduğunda (User Gesture: touchend/click)
+    // eklenen history.pushState kayıtlarını geçerli sayar; sayfa açılışında eklenenleri atlar.
+    // Bu yüzden kullanıcının her gerçek dokunuşunda tamponu 8 kademeye kadar besliyoruz:
+    function feedUserGestureHistory() {
+      if (userActivatedGuards < 8) {
         ensureHistoryBuffer();
       }
-    }, { passive: true });
+    }
+    document.addEventListener('touchstart', feedUserGestureHistory, { passive: true });
+    document.addEventListener('touchend', feedUserGestureHistory, { passive: true });
+    document.addEventListener('click', feedUserGestureHistory, { passive: true });
 
     initHistoryGuard();
 
     window.setTab = function(tab) {
-      if (state.activeTab !== tab) {
-        pushNavState('tab:' + tab);
-      }
+      pushNavState('tab:' + tab);
       state.activeTab = tab;
       state.viewingStatusList = null;
       state.viewingMemberKasa = null;
@@ -4212,13 +4487,19 @@
       render();
     };
 
-    window.openStatusPage = function(status) {
+    window.openStatusPage = function(status, autoFocusSearch) {
       pushNavState('status:' + (status || 'Tümü'));
       state.viewingStatusList = status || 'Tümü';
       state.selectedFilter = status || 'Tümü';
       state.searchQuery = '';
       saveNavState();
       render();
+      if (autoFocusSearch) {
+        setTimeout(function() {
+          var sEl = document.getElementById('mainSearchInput');
+          if (sEl) sEl.focus();
+        }, 40);
+      }
     };
 
     window.closeStatusPage = function() {

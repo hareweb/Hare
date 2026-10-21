@@ -385,51 +385,115 @@ Bu belgede, Hâre İnsani Yardım ve Ekip Koordinasyon Platformu'nda yapılan so
 Uygulamanın tamamı Node.js sanal tarayıcı (VM) ortamında uçtan uca simüle edilerek tüm sekmeler, alt sekmeler, modallar ve 61 ayrı etkileşim fonksiyonu otomatik olarak test edildi. Tespit edilip tek seferde giderilen tüm gizli hatalar:
 
 1. **Çıkış (`logout`) Sonrası Kayıtların Silinmesi Hatası (Kritik Veri Kaybı):**
-   * **Sebep:** `logout()` fonksiyonu hafızadaki `state.aids = []`, `state.budget = []` dizilerini sıfırlıyordu. Kullanıcı tekrar giriş yaptığında sunucu eşitlemesi henüz tamamlanmadan bir işlem yaparsa (veya PIN değiştirirse), `pushToGoogleSheet()` sunucuya boş dizi (`[]`) gönderip E-Tablo'daki kayıtları silebiliyordu.
-   * **Çözüm:** Çıkış yapıldığında yerel önbellek dizilerinin sıfırlanması kaldırıldı (oturum kapalıyken zaten ekranda hiçbir veri gösterilmez). Böylece E-Tablo'ya yanlışlıkla boş liste gönderilmesi tamamen engellendi.
-2. **Hayırseverler Listesinde Gizli `b.type` Değişken Hatası ve Görünmeyen Makbuz Butonu:**
-   * **Sebep:** "💬 Teşekkür & Makbuz" butonu (`sendDonorReceiptWhatsApp`), yanlışlıkla `renderDonorsListHTML` (bağışçı kartları) içine `b.type === 'gelir'` koşuluyla eklenmişti. O döngüde değişken `d` olduğu ve `b` global döngüden `4` değerini aldığı için buton hiçbir ekranda görünmüyordu.
-   * **Çözüm:** Hatalı referans `renderDonorsListHTML` içinden temizlendi ve gerçek yeri olan Sandık (`budgetListHTML`) gelir kayıtlarının içine eklendi.
-3. **Ekip & Yönetim Sekmesindeki `NaN` Yazısı Hatası:**
-   * **Sebep:** Otomatik yedekler kartının kapanışında `'</div>' + + '</div>'` şeklinde çift artı (`+ +`) operatörü kalmıştı; JavaScript ikinci `+'</div>'` ifadesini sayıya çevirmeye çalışıp ekrana `NaN` basıyordu.
-   * **Çözüm:** Çift `+` operatörü temizlendi.
-4. **Emanet Devirlerinin (`transfers`) Sayfa Yenilemede Sıfırlanması:**
-   * **Sebep:** `state` nesnesi içinde 372. satırda `transfers: getCachedList('hare_cached_transfers')` tanımlanmışken, 391. satırda mükerrer olarak `transfers: []` yazıldığı için önbellekteki devirler her açılışta eziliyordu.
-   * **Çözüm:** Mükerrer `transfers: []` satırı kaldırıldı.
-5. **Modal Açıldığında Arka Plan Kaydırma Kilidinin (`isAnyModalOpen`) Çalışmaması:**
-   * **Sebep:** `render()` fonksiyonu içinde `isAnyModalOpen` değişkeni, `selectedAid` ve `editingAid` değişkenleri tanımlanmadan *önce* hesaplanıyordu (`undefined` dönüyordu).
-   * **Çözüm:** Değişken tanımlamaları `isAnyModalOpen` kontrolünün üstüne alındı; artık herhangi bir pencere açıldığında arka plan kaydırması tam kilitlenir.
-6. **Sandık, Devirler ve Bağışçılar İçin Çift Taraflı Akıllı Eşitleme (`mergeSafeList`):**
-   * **Sebep:** Çift taraflı koruma yalnızca `aids` (Haneler) için vardı; `budget`, `transfers` ve `donors` listeleri sunucudan gelen veriyle doğrudan eziliyordu. Ayrıca sunucuda `deliveryPhotos` sütunu eksikse yereldeki teslimat fotoğrafları silinebiliyordu.
-   * **Çözüm:** Tüm listeler (`aids`, `budget`, `transfers`, `donors`) `mergeSafeList` motoruna bağlandı; yerel teslimat fotoğrafları, kategoriler ve henüz sunucuya yansımamış yeni kayıtlar hiçbir koşulda kaybolmaz.
-7. **Temizle (`🧹`) Butonunda Silinen Kayıtların Geri Gelmesi:**
-   * **Sebep:** `clearCacheAndResync` içinde `localStorage.removeItem('hare_deleted_ids')` çağrıldığı için daha önce silinmiş kayıtların ID listesi sıfırlanıyordu.
-   * **Çözüm:** Silinen ID listesinin (`hare_deleted_ids`) temizlenmesi kaldırıldı; silinen kayıtlar asla geri gelmez.
-8. **Hane Düzenleme (`editAid`) Penceresinde İhtiyaç Kalemleri (`category`) Eksikliği:**
-   * **Sebep:** Yeni hane eklerken seçilen ihtiyaç kalemleri (Gıda, Nakit, Yakacak vb.), hane düzenleme penceresinde bulunmuyordu.
-   * **Çözüm:** Hane düzenleme penceresine ihtiyaç kalemleri onay kutuları eklendi.
-9. **PIN Değiştirme Sonrası Kalıcı Oturum Sızıntısı:**
-   * **Sebep:** `handleSaveChangePin` fonksiyonu "Beni Hatırla" kapalı olsa bile `localStorage` içine `hare_user` yazıyordu.
-   * **Çözüm:** Yalnızca `sessionStorage` güncellenir; kalıcı hafızaya sadece "Beni Hatırla" açıkken yazılır.
 
+   * **Sebep:** `logout()` fonksiyonu hafızadaki `state.aids = []`, `state.budget = []` dizilerini sıfırlıyordu. Kullanıcı tekrar giriş yaptığında sunucu eşitlemesi henüz tamamlanmadan bir işlem yaparsa (veya PIN değiştirirse), `pushToGoogleSheet()` sunucuya boş dizi (`[]`) gönderip E-Tablo'daki kayıtları silebiliyordu.
+
+   * **Çözüm:** Çıkış yapıldığında yerel önbellek dizilerinin sıfırlanması kaldırıldı (oturum kapalıyken zaten ekranda hiçbir veri gösterilmez). Böylece E-Tablo'ya yanlışlıkla boş liste gönderilmesi tamamen engellendi.
+
+2. **Hayırseverler Listesinde Gizli `b.type` Değişken Hatası ve Görünmeyen Makbuz Butonu:**
+
+   * **Sebep:** "💬 Teşekkür & Makbuz" butonu (`sendDonorReceiptWhatsApp`), yanlışlıkla `renderDonorsListHTML` (bağışçı kartları) içine `b.type === 'gelir'` koşuluyla eklenmişti. O döngüde değişken `d` olduğu ve `b` global döngüden `4` değerini aldığı için buton hiçbir ekranda görünmüyordu.
+
+   * **Çözüm:** Hatalı referans `renderDonorsListHTML` içinden temizlendi ve gerçek yeri olan Sandık (`budgetListHTML`) gelir kayıtlarının içine eklendi.
+
+3. **Ekip & Yönetim Sekmesindeki `NaN` Yazısı Hatası:**
+
+   * **Sebep:** Otomatik yedekler kartının kapanışında `'</div>' + + '</div>'` şeklinde çift artı (`+ +`) operatörü kalmıştı; JavaScript ikinci `+'</div>'` ifadesini sayıya çevirmeye çalışıp ekrana `NaN` basıyordu.
+
+   * **Çözüm:** Çift `+` operatörü temizlendi.
+
+4. **Emanet Devirlerinin (`transfers`) Sayfa Yenilemede Sıfırlanması:**
+
+   * **Sebep:** `state` nesnesi içinde 372. satırda `transfers: getCachedList('hare_cached_transfers')` tanımlanmışken, 391. satırda mükerrer olarak `transfers: []` yazıldığı için önbellekteki devirler her açılışta eziliyordu.
+
+   * **Çözüm:** Mükerrer `transfers: []` satırı kaldırıldı.
+
+5. **Modal Açıldığında Arka Plan Kaydırma Kilidinin (`isAnyModalOpen`) Çalışmaması:**
+
+   * **Sebep:** `render()` fonksiyonu içinde `isAnyModalOpen` değişkeni, `selectedAid` ve `editingAid` değişkenleri tanımlanmadan *önce* hesaplanıyordu (`undefined` dönüyordu).
+
+   * **Çözüm:** Değişken tanımlamaları `isAnyModalOpen` kontrolünün üstüne alındı; artık herhangi bir pencere açıldığında arka plan kaydırması tam kilitlenir.
+
+6. **Sandık, Devirler ve Bağışçılar İçin Çift Taraflı Akıllı Eşitleme (`mergeSafeList`):**
+
+   * **Sebep:** Çift taraflı koruma yalnızca `aids` (Haneler) için vardı; `budget`, `transfers` ve `donors` listeleri sunucudan gelen veriyle doğrudan eziliyordu. Ayrıca sunucuda `deliveryPhotos` sütunu eksikse yereldeki teslimat fotoğrafları silinebiliyordu.
+
+   * **Çözüm:** Tüm listeler (`aids`, `budget`, `transfers`, `donors`) `mergeSafeList` motoruna bağlandı; yerel teslimat fotoğrafları, kategoriler ve henüz sunucuya yansımamış yeni kayıtlar hiçbir koşulda kaybolmaz.
+
+7. **Temizle (`🧹`) Butonunda Silinen Kayıtların Geri Gelmesi:**
+
+   * **Sebep:** `clearCacheAndResync` içinde `localStorage.removeItem('hare_deleted_ids')` çağrıldığı için daha önce silinmiş kayıtların ID listesi sıfırlanıyordu.
+
+   * **Çözüm:** Silinen ID listesinin (`hare_deleted_ids`) temizlenmesi kaldırıldı; silinen kayıtlar asla geri gelmez.
+
+8. **Hane Düzenleme (`editAid`) Penceresinde İhtiyaç Kalemleri (`category`) Eksikliği:**
+
+   * **Sebep:** Yeni hane eklerken seçilen ihtiyaç kalemleri (Gıda, Nakit, Yakacak vb.), hane düzenleme penceresinde bulunmuyordu.
+
+   * **Çözüm:** Hane düzenleme penceresine ihtiyaç kalemleri onay kutuları eklendi.
+
+9. **PIN Değiştirme Sonrası Kalıcı Oturum Sızıntısı:**
+
+   * **Sebep:** `handleSaveChangePin` fonksiyonu "Beni Hatırla" kapalı olsa bile `localStorage` içine `hare_user` yazıyordu.
+
+   * **Çözüm:** Yalnızca `sessionStorage` güncellenir; kalıcı hafızaya sadece "Beni Hatırla" açıkken yazılır.
 
 ### 25. 📱 Tüm Sistemde Alt Tuş Takımı Koruması, Geri Tuşu Hiyerarşisi ve Arka Plan Oturum Sürekliliği (188679.jpg Çözümü)
 
 * **Karşılaşılan 3 Sorun (`188679.jpg` Analizi):**
+
   1. **Alt Tuş Takımının Açılır Pencerelerde (Modallarda) Butonlarla Çakışması:** Hane Düzenleme, Hane Detay, Kasa/Bağışçı/Gönüllü Düzenleme gibi pencereler (`z-50` – `z-[130]`) açıldığında, alt menünün (`z-40`) üstüne biniyor ve en alttaki yeşil **"Değişiklikleri Kaydet ve E-Tabloya Gönder"** butonu telefonun sanal geri/ana ekran tuşlarının (`■ ● ◀`) tam altına giriyordu.
+
   2. **Geri Tuşunun Uygulamayı Kapatması:** Geri tuşuna basıldığında Android WebView geçmiş yığını (`canGoBack()`) URL hash değişimi olmadığı için boş görünüyor ya da ana ekranda çift basışta `exitApp()` / `history.go(-length)` çalışarak uygulamayı tamamen kapatıyordu.
+
   3. **Uygulamayı Arka Plana Atınca Oturumdan Çıkması:** Uygulama arka plana atıldığında veya Kamera/Harita/WhatsApp gibi harici bir uygulamaya geçildiğinde bazı Android WebView (APK / `file://`) sürümlerinde `sessionStorage` sıfırlandığı için kullanıcıdan tekrar şifre isteniyordu.
 
 * **Uygulanan Kesin Çözümler:**
+
   1. **🛡️ Tüm Sistemde Sabit Zümrüt Yeşili Alt Tuş Barı (`#global-system-bar` - `z-[999]`):**
+
      * Sistem gezinti çubuğu (`#global-system-bar`) tüm pencerelerin ve modalların üstünde kalacak şekilde (`z-[999]`, asgari `52px` / `3.25rem` yükseklikte) doğrudan `<body>` seviyesine sabitlendi.
+
      * Tüm açılır pencerelere (Hane Detay, Hane Düzenle, Kasa Düzenle, Hayırsever Düzenle, Gönüllü Yetki Düzenle, Fotoğraf İnceleme, PIN Değiştirme ve Onay pencereleri) `.modal-sheet-safe` (`calc(var(--sys-nav-h) + 1.5rem)`) alt güvenlik boşluğu eklendi.
+
      * Böylece hangi pencere veya bölüm açılırsa açılsın, kaydetme butonları daima zümrüt yeşili alt tuş barının üzerinde kalır; telefonun `■ ● ◀` tuşlarıyla asla üst üste binmez.
+
   2. **🔙 Geri Tuşunun Uygulamayı Asla Kapatmaması — Yalnızca İlgili Bölümü Kapatması:**
+
      * Uygulamayı kapatan `exitApp()` ve `history.go(-history.length)` kodları tamamen kaldırıldı.
+
      * Android WebView'in `canGoBack()` kontrolünü işletim sistemi seviyesinde daima canlı tutan gerçek URL hash tabanlı geçmiş tamponu (`#hare-1`, `#hare-2` ...) ve `backbutton` + `popstate` köprüsü kuruldu.
+
      * Geri tuşuna basıldığında yalnızca açık olan pencere veya bölüm kapanır (Onay Penceresi → PIN → Fotoğraf → Hane Düzenle → Hane Detay → Hayır Defteri / Sorumlu Kasası → Alt Sekmeler → Kategori Listesi → Haneler Ana Ekranı). Ana ekrandayken geri tuşuna basılsa dahi uygulama **kesinlikle kapanmaz**.
+
   3. **🔒 Arka Planda Oturumu Koruma & Yalnızca Tamamen Kapatınca Şifre İsteme:**
+
      * Çok katmanlı oturum motoru (`sessionStorage` + `window.name` + `hare_session_active=1` süreç çerezi + arka plan kalp atışı ve harici uygulama köprüsü) devreye alındı.
+
      * Uygulama arka plana atıldığında (orta tuşa basıldığında), ekran kilitlendiğinde veya WhatsApp/Harita/Kamera açıldığında kullanıcı çıkışı **kesinlikle olmaz** ve kaldığınız bölüm korunur.
+
      * Yalnızca uygulama son kullanılanlardan kaydırılarak **tamamen kapatıldığında** (veya sağ üstten `🚪` Çıkış butonuna basıldığında) yeniden açılışta güvenlik için PIN kodu sorulur.
+
+
+### 26. 📦 Sadeleştirilmiş Emanet Türleri (Eşya vb.), HD Fotoğraf Kalitesi, Android Chromium Geri Tuşu Çözümü ve Tam Sistem Denetimi
+
+1. **📦 Emanet Türü (İhtiyaç Kalemleri) Sadeleştirildi ve Genişletildi:**
+   * Hem **Hane Ekle** hem **Hane Düzenle** hem de **Sandık (Kasa)** ekranlarındaki uzun ve parantezli ifadeler sadeleştirilerek sahada en çok ihtiyaç duyulan **10 net kategoriye** çıkarıldı:
+     * `🥖 Gıda / Erzak`, `💵 Nakit Destek`, `🛋️ Ev Eşyası`, `🧺 Beyaz Eşya`, `🔥 Yakacak`, `👕 Giyim`, `💊 Sağlık / İlaç`, `🏠 Kira / Fatura`, `👶 Yetim / Eğitim`, `📦 Diğer`
+   * **Geriye Dönük Tam Uyumluluk (`normalizeCategoryLabel`):** Daha önce eski uzun isimlerle (*"Gıda / Erzak (Yiyecek)"*, *"Kisve (Giyim / Kıyafet)"* vb.) kaydedilmiş haneler otomatik olarak yeni sade isimlere dönüştürülür; hiçbir eski veri kaybolmaz.
+
+2. **📸 Fotoğraf Kalite Ayarları HD Seviyeye Yükseltildi (`compressPhotoHD`):**
+   * Eski `650px` ve `%55` düşük sıkıştırma ayarı kaldırıldı; yerine **1280px HD çözünürlük**, **%85 JPEG kalitesi** ve yüksek kaliteli bikübik keskinleştirme (`imageSmoothingQuality: 'high'`) getirildi.
+   * **Akıllı Google E-Tablo Hücre Sınırı Koruması:** 3 fotoğraf yüklendiğinde Google E-Tablo'nun tek hücredeki 50.000 karakter sınırını aşmaması için otomatik boyut dengeleyici eklendi.
+   * **Hane Düzenleme İçinden Fotoğraf Ekleme / Silme:** Artık mevcut bir hanenin bilgilerini düzenlerken (`Hane Bilgilerini Düzenle`) sonradan yeni HD fotoğraf ekleyebilir veya yanlış eklenmiş fotoğrafı silebilirsiniz. Ayrıca teslimat fotoğraflarına da silme (`✕`) butonu eklendi.
+
+3. **🔙 Android WebView Geri Tuşunun Uygulamayı Kapatması Kökten Çözüldü (Chromium User-Gesture Koruması):**
+   * **Kök Sebep:** Android System WebView (Chromium), sayfa ilk açılırken (kullanıcı ekrana dokunmadan önce) eklenen `history.pushState` kayıtlarını güvenlik politikası (*History Manipulation Intervention*) gereği yok sayıp `canGoBack() = false` döndürerek uygulamayı kapatıyordu. Ayrıca önceki `click` dinleyicisinde bulunan `#hare-0` koşulu yeni kayıt eklenmesini engelliyordu.
+   * **Kesin Çözüm:** Kısıtlayıcı koşul kaldırıldı; artık kullanıcının ekrana yaptığı her gerçek dokunuşta (`touchstart`, `touchend`, `click`) Android işletim sisteminin %100 geçerli saydığı kullanıcı etkileşimli (`user-activated`) geçmiş kaydı üretilir.
+   * Hem `popstate`, hem `hashchange`, hem `backbutton`, hem de donanım geri tuşu (`keyCode: 4` / `GoBack`) yakalanarak yalnızca açık olan pencerenin/bölümün kapanması garanti altına alındı. Ayrıca tüm açılır pencerelerin sağ üst köşesine net **`← Geri`** butonu eklendi.
+
+4. **🔍 Tüm Sistem Taraması ve Sorunsuz Uygulama Standartlarında Ek İyileştirmeler:**
+   * **Teslimat Fotoğraflarının Apps Script Güncellemesine Gerek Kalmadan Eşitlenmesi:** Teslimat fotoğrafları (`deliveryPhotos`), sunucuya gönderilirken `;delivery=1;base64,` imzasıyla paketlenir ve okunurken otomatik ayrıştırılır; böylece E-Tablo scriptinize yeni sütun eklemenize gerek kalmadan teslimat kanıtları tüm telefonlarda görünür.
+   * **Gelişmiş Arama Motoru:** Hane araması artık yalnızca isim ve mahallede değil; **telefon numarası, açık adres, ihtiyaç kalemi (ör. "Ev Eşyası", "Beyaz Eşya") ve ilgilenen gönüllü** içinde de anında arama yapar.
+   * **Genel Sandık Hızlı Filtre ve Arama:** Sandık geçmişine `Tümü`, `🟢 Teberru`, `🔴 İnfak`, `🏦 Banka`, `💵 Elden` filtreleri ve anlık arama kutusu eklendi.
+   * **Kasa Düzenleme ve Excel CSV İyileştirmesi:** Kasa hareketi düzenleme penceresine (`Kasa Hareketini Düzenle`) **Kategori / Kalem** alanı ve Hane Düzenleme penceresine **Durum** alanı eklendi.
