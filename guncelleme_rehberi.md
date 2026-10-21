@@ -325,15 +325,44 @@ Bu belgede, Hâre İnsani Yardım ve Ekip Koordinasyon Platformu'nda yapılan so
 ### 22. 🗺️ Harita Sadeleştirmesi: Canlı Navigasyon, Google & Yandex Kaldırıldı — Saf Sistem Haritası
 
 * **Kullanıcı Talebi:**
+
   * "Canlı Navigasyon" butonu ve bölümü komple kaldırıldı.
+
   * "Haritada Gör" bölümü korundu; içinden Google Haritalar web yönlendirmesi ve Yandex Navigasyon bölümleri tamamen çıkartıldı.
 
 * **Yapılan Sadeleştirme ve İyileştirmeler:**
+
   1. **"🧭 Canlı Navigasyon" Tamamen Kaldırıldı:**
+
      * Hane detay kartındaki ikili navigasyon butonları sadeleştirildi; karmaşıklık yaratan "Canlı Navigasyon" eylemi ve ilgili yönlendirmeler tamamen iptal edildi.
+
   2. **"🗺️ Haritada Gör" — Doğrudan Yerel Sistem Haritası (`geo:`):**
+
      * Google Haritalar web sitesine gitme veya Yandex Navi açma zorlaması kaldırıldı.
+
      * Artık "🗺️ Haritada Gör" butonuna basıldığında Android'in yerel sistem harita protokolü (`geo:lat,lon?q=lat,lon(Hane)`) doğrudan arka planda tetiklenir; telefonunuzda yüklü varsayılan harita uygulaması (Google Haritalar uygulaması veya sistem harita seçicisi) doğrudan açılır.
+
      * Tarayıcınız asla `support.google.com` adresine ("Tarayıcınızı güncelleyin") yönlenmez; Hâre uygulaması kendi sayfasında canlı kalır.
+
   3. **📋 "Konumu Kopyala" Butonu:**
+
      * "Haritada Gör" butonunun yanına pratik bir "📋 Konumu Kopyala" butonu eklendi. Tek dokunuşla hanenin enlem/boylam koordinatlarını ve açık adresini panoya kopyalayarak WhatsApp'a veya başka harita programlarına kolayca yapıştırabilirsiniz.
+
+### 23. 🔒 Oturum Güvenliği: Uygulama Kapatıldığında / Arka Plandan Silindiğinde PIN İsteme
+
+* **Karşılaşılan Durum:**
+  * Uygulama açılışında oturum verisi kalıcı olarak `localStorage` içinde saklandığı için, uygulama kapatılsa veya arka plandan silinse dahi tekrar açıldığında PIN sormadan doğrudan ana ekrana giriyordu.
+  * Bu durum hem mobil APK'da hem de web sürümünde telefon başkalarının eline geçtiğinde güvenlik ve mahremiyet riski oluşturuyordu.
+
+* **Yapılan Düzeltmeler ve Güvenlik İyileştirmeleri:**
+  1. **Geçici Oturum Mimarisi (`sessionStorage`):**
+     * Aktif oturum artık kalıcı `localStorage` yerine oturum bazlı `sessionStorage` üzerinde tutulur.
+     * Uygulama tamamen kapatıldığında, arka plandan silindiğinde veya web tarayıcısı kapatıldığında oturum otomatik olarak sonlanır.
+     * Uygulama yeniden başlatıldığında gönüllüden güvenlik amacıyla 4 haneli PIN kodunu girmesi istenir.
+  2. **Akıllı Gönüllü Hatırlama:**
+     * Giriş ekranında en son giriş yapan gönüllü kardeşimizin ismi otomatik olarak seçili gelir. Böylece her seferinde listeden isim aramak zorunda kalmazsınız; yalnızca 4 haneli PIN kodunuzu girip anında giriş yapabilirsiniz.
+  3. **İsteğe Bağlı "Oturumu Sürekli Açık Tut (Beni Hatırla)" Seçeneği:**
+     * Giriş formuna isteğe bağlı bir onay kutusu eklendi.
+     * Yalnızca kullanıcı bu kutuyu bizzat işaretlerse kalıcı oturum açılır; işaretlenmediği takdirde uygulama her kapatılıp açıldığında PIN sorarak tam güvenlik sağlar.
+  4. **Sayfa Yenilemede (F5) Kesintisiz Çalışma:**
+     * Web sürümünde çalışırken yapılan sayfa yenilemelerinde (F5) veya filtre değişimlerinde `sessionStorage` sayesinde oturum kapanmaz; yalnızca uygulama veya sekme tamamen kapatıldığında kilitlenir.
