@@ -49,7 +49,7 @@
   </script>
 
   <style>
-    body { -webkit-tap-highlight-color: transparent; user-select: none; font-family: 'Plus Jakarta Sans', sans-serif; }
+    body { -webkit-tap-highlight-color: transparent; user-select: none; font-family: 'Plus Jakarta Sans', sans-serif; overscroll-behavior-y: contain; }
     h1, h2, h3, .font-display { font-family: 'Outfit', sans-serif; }
     .hide-scrollbar::-webkit-scrollbar { display: none; }
     .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
@@ -277,15 +277,32 @@
       ];
     })();
 
-    // UYGULAMA DURUMU (Veriler oturum açılana kadar BOŞTUR)
+    // 💾 GÜVENLİ YEREL ÖNBELLEK YARDIMCISI (0 ms Anında Açılış & Sıfırlanma Koruması)
+    function getCachedList(key) {
+      try {
+        var raw = localStorage.getItem(key);
+        if (raw) {
+          var parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) return parsed;
+        }
+      } catch(e) {}
+      return [];
+    }
+
+    function saveCacheItem(key, val) {
+      try { localStorage.setItem(key, JSON.stringify(val)); } catch(e) {}
+    }
+
+    // UYGULAMA DURUMU (Açılışta önbellekten anında yüklenir, ardından E-Tablo ile eşitlenir)
     const state = {
       currentUser: null, // Giriş yapılmadan veriler yüklenmez!
       sheetUrl: (function() { try { return localStorage.getItem('hare_sheet_url') || DEFAULT_SHEET_URL; } catch(e) { return DEFAULT_SHEET_URL; } })(),
       members: INITIAL_MEMBERS,
-      aids: [],
-      budget: [],
-      donors: [],
-      logs: [],
+      aids: getCachedList('hare_cached_aids'),
+      budget: getCachedList('hare_cached_budget'),
+      donors: getCachedList('hare_cached_donors'),
+      transfers: getCachedList('hare_cached_transfers'),
+      logs: getCachedList('hare_cached_logs'),
       activeTab: 'yardimlar',
       adminSubTab: 'rehber',
       privacyMode: false,
@@ -344,6 +361,11 @@
       showToast('🧹 Önbellek temizleniyor ve E-Tablo eşitleniyor...');
       try {
         localStorage.removeItem('hare_deleted_ids');
+        localStorage.removeItem('hare_cached_aids');
+        localStorage.removeItem('hare_cached_budget');
+        localStorage.removeItem('hare_cached_donors');
+        localStorage.removeItem('hare_cached_transfers');
+        localStorage.removeItem('hare_cached_logs');
         if ('caches' in window) {
           var names = await caches.keys();
           for (var i = 0; i < names.length; i++) {
@@ -507,15 +529,19 @@
           if (!state.isPushing) {
             if (Array.isArray(data.aids)) {
               state.aids = data.aids.filter(function(a) { return !isIdDeleted(a.id); });
+              saveCacheItem('hare_cached_aids', state.aids);
             }
             if (Array.isArray(data.budget)) {
               state.budget = data.budget.filter(function(b) { return !isIdDeleted(b.id); });
+              saveCacheItem('hare_cached_budget', state.budget);
             }
             if (Array.isArray(data.transfers)) {
               state.transfers = data.transfers.filter(function(t) { return !isIdDeleted(t.id); });
+              saveCacheItem('hare_cached_transfers', state.transfers);
             }
             if (Array.isArray(data.donors)) {
               state.donors = data.donors.filter(function(d) { return !isIdDeleted(d.id); });
+              saveCacheItem('hare_cached_donors', state.donors);
             }
             if (Array.isArray(data.members)) {
               state.members = data.members.filter(function(m) { return !isIdDeleted(m.id); }).map(function(m) {
@@ -576,8 +602,16 @@
       };
       state.logs.unshift(newLog);
 
+      // Yerel önbelleği anında güncelle (Çevrimdışı ve yenileme anında verilerin kaybolmasını engeller)
+      saveCacheItem('hare_cached_aids', state.aids);
+      saveCacheItem('hare_cached_budget', state.budget);
+      saveCacheItem('hare_cached_transfers', state.transfers);
+      saveCacheItem('hare_cached_donors', state.donors);
+      saveCacheItem('hare_cached_members', state.members);
+      saveCacheItem('hare_cached_logs', state.logs);
+
       state.isSyncing = true;
-      state.isPushing = true; // Sunucuya yazılırken eski verilerin silinenleri geri getirmesini engeller
+      state.isPushing = true;
       render();
 
       try {
@@ -827,22 +861,21 @@
         return;
       }
       var msgParam = defaultMsg ? '&text=' + encodeURIComponent(defaultMsg) : '';
-      var waUrl = 'https://api.whatsapp.com/send?phone=' + waNum + msgParam;
+      // 📱 Doğrudan yerel WhatsApp uygulamasını tetikler (web indirme/onay ekranını atlar)
+      var appUrl = 'whatsapp://send?phone=' + waNum + msgParam;
+      var webUrl = 'https://api.whatsapp.com/send?phone=' + waNum + msgParam;
 
-      // 🛡️ Güvenli Harici Açma: Webview yönlendirmesini engelleyerek geri tuşunun uygulamayı kapatmasını önler
       pushNavState('external');
       try {
         var a = document.createElement('a');
-        a.href = waUrl;
-        a.target = '_blank';
-        a.rel = 'noopener noreferrer';
+        a.href = appUrl;
         document.body.appendChild(a);
         a.click();
         setTimeout(function() {
           if (a && a.parentNode) a.parentNode.removeChild(a);
         }, 300);
       } catch(err) {
-        window.open(waUrl, '_blank', 'noopener,noreferrer');
+        window.location.href = webUrl;
       }
     };
 
@@ -862,20 +895,19 @@
         '🗺️ *Konum:* ' + (item.mapsUrl || 'Eklenmedi') + '\n\n' +
         '_Hâre İnsani Yardım Halkası_';
 
-      var waUrl = 'https://api.whatsapp.com/send?text=' + encodeURIComponent(text);
+      var appUrl = 'whatsapp://send?text=' + encodeURIComponent(text);
+      var webUrl = 'https://api.whatsapp.com/send?text=' + encodeURIComponent(text);
       pushNavState('external');
       try {
         var a = document.createElement('a');
-        a.href = waUrl;
-        a.target = '_blank';
-        a.rel = 'noopener noreferrer';
+        a.href = appUrl;
         document.body.appendChild(a);
         a.click();
         setTimeout(function() {
           if (a && a.parentNode) a.parentNode.removeChild(a);
         }, 300);
       } catch(err) {
-        window.open(waUrl, '_blank', 'noopener,noreferrer');
+        window.location.href = webUrl;
       }
     };
 
@@ -3002,16 +3034,38 @@
       var targetId = String(id || '').trim();
       var item = state.aids.find(function(a) { return String(a.id).trim() === targetId; });
       if (!item) return;
-      var url = '';
-      if (item.mapsUrl && (item.mapsUrl.indexOf('http://') === 0 || item.mapsUrl.indexOf('https://') === 0)) {
-        url = item.mapsUrl.trim();
+
+      var rawUrl = (item.mapsUrl || '').trim();
+      var coordsMatch = rawUrl.match(/q=([-\d.]+),([-\d.]+)/) || rawUrl.match(/@([-\d.]+),([-\d.]+)/);
+      var navUrl = '';
+
+      if (coordsMatch) {
+        var lat = coordsMatch[1];
+        var lon = coordsMatch[2];
+        // 🗺️ Android & iOS cihazlarda doğrudan Google Haritalar uygulamasını (Navigasyon) açar
+        navUrl = 'https://www.google.com/maps/dir/?api=1&destination=' + lat + ',' + lon;
+      } else if (rawUrl && (rawUrl.indexOf('http://') === 0 || rawUrl.indexOf('https://') === 0)) {
+        navUrl = rawUrl;
       } else {
         var parts = [item.address, item.neighborhood, item.district, item.city].filter(function(x) { return x && String(x).trim().length > 0; });
-        var query = parts.join(', ');
-        if (!query) query = item.name || '';
-        url = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(query);
+        var query = parts.join(', ') || item.name || '';
+        navUrl = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(query);
       }
-      window.open(url, '_blank', 'noopener,noreferrer');
+
+      pushNavState('external');
+      try {
+        var a = document.createElement('a');
+        a.href = navUrl;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(function() {
+          if (a && a.parentNode) a.parentNode.removeChild(a);
+        }, 300);
+      } catch(e) {
+        window.location.href = navUrl;
+      }
     };
 
     // FOTOĞRAF IŞIK KUTUSU (LIGHTBOX) FONKSİYONLARI
