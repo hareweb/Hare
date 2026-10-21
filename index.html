@@ -389,7 +389,6 @@
       isSyncing: false,
       loginError: '',
       viewingPhotoUrl: null,
-      transfers: [],
       kasaSubTab: 'genel', // 'genel' | 'sorumlular' | 'devirler'
       viewingMemberKasa: null, // Sorumlunun ismi (Örn: 'Muhammet')
       memberKasaFilter: 'tumu', // 'tumu' | 'gelir' | 'gider' | 'devir'
@@ -427,9 +426,8 @@
     }
 
     window.clearCacheAndResync = async function() {
-      showToast('🧹 Önbellek temizleniyor ve E-Tablo eşitleniyor...');
+      showToast('🧹 Ağ önbelleği yenileniyor ve E-Tablo eşitleniyor...');
       try {
-        localStorage.removeItem('hare_deleted_ids');
         if ('caches' in window) {
           var names = await caches.keys();
           for (var i = 0; i < names.length; i++) {
@@ -650,28 +648,55 @@
         if (data && !data.error) {
           // Eğer o sırada kullanıcı bir silme/ekleme gönderiyorsa sunucudaki eski verinin yerel silinenleri geri getirmesini engelle
           if (!state.isPushing) {
-            if (Array.isArray(data.aids)) {
-              var serverAids = data.aids.filter(function(a) { return !isIdDeleted(a.id); });
-              // 🛡️ ÇİFT TARAFLI BİRLEŞTİRME: Yerelde yeni eklenen fakat henüz sunucuya yansımamış kayıtları koru
-              var serverIdMap = {};
-              serverAids.forEach(function(sa) { serverIdMap[String(sa.id).trim()] = true; });
-              var localOnly = (state.aids || []).filter(function(la) {
-                var lId = String(la.id).trim();
-                return !serverIdMap[lId] && !isIdDeleted(lId);
+            function mergeSafeList(localArr, serverArr, isAidList) {
+              var cleanServer = (serverArr || []).filter(function(x) { return x && !isIdDeleted(x.id); });
+              var serverMap = {};
+              cleanServer.forEach(function(sx) { serverMap[String(sx.id).trim()] = sx; });
+              var localMap = {};
+              (localArr || []).forEach(function(lx) { if (lx && lx.id) localMap[String(lx.id).trim()] = lx; });
+
+              // Sunucuda olan kayıtları al, fakat yerelde teslimat fotoğrafı veya kategori varsa ve sunucuda eksikse koru
+              var mergedServer = cleanServer.map(function(sx) {
+                var sId = String(sx.id).trim();
+                var loc = localMap[sId];
+                if (loc && isAidList) {
+                  if ((!Array.isArray(sx.deliveryPhotos) || sx.deliveryPhotos.length === 0) && Array.isArray(loc.deliveryPhotos) && loc.deliveryPhotos.length > 0) {
+                    sx.deliveryPhotos = loc.deliveryPhotos;
+                  }
+                  if ((!Array.isArray(sx.photos) || sx.photos.length === 0) && Array.isArray(loc.photos) && loc.photos.length > 0) {
+                    sx.photos = loc.photos;
+                  }
+                }
+                if (loc && !isAidList && !sx.category && loc.category) {
+                  sx.category = loc.category;
+                }
+                return sx;
               });
-              state.aids = localOnly.concat(serverAids);
+
+              // Yerelde yeni eklenmiş ama henüz sunucuya yansımamış kayıtları koru
+              var localOnly = (localArr || []).filter(function(lx) {
+                if (!lx || !lx.id) return false;
+                var lId = String(lx.id).trim();
+                return !serverMap[lId] && !isIdDeleted(lId);
+              });
+
+              return localOnly.concat(mergedServer);
+            }
+
+            if (Array.isArray(data.aids)) {
+              state.aids = mergeSafeList(state.aids, data.aids, true);
               saveCacheItem('hare_cached_aids', state.aids);
             }
             if (Array.isArray(data.budget)) {
-              state.budget = data.budget.filter(function(b) { return !isIdDeleted(b.id); });
+              state.budget = mergeSafeList(state.budget, data.budget, false);
               saveCacheItem('hare_cached_budget', state.budget);
             }
             if (Array.isArray(data.transfers)) {
-              state.transfers = data.transfers.filter(function(t) { return !isIdDeleted(t.id); });
+              state.transfers = mergeSafeList(state.transfers, data.transfers, false);
               saveCacheItem('hare_cached_transfers', state.transfers);
             }
             if (Array.isArray(data.donors)) {
-              state.donors = data.donors.filter(function(d) { return !isIdDeleted(d.id); });
+              state.donors = mergeSafeList(state.donors, data.donors, false);
               saveCacheItem('hare_cached_donors', state.donors);
             }
             if (Array.isArray(data.members)) {
@@ -1372,10 +1397,7 @@
           '</div>' +
           contactBtns +
           (d.notes ? '<p class="text-xs text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-100 italic">"' + maskNotes(d.notes) + '"</p>' : '') +
-          (adminBtns ? '<div class="pt-1 flex justify-end">' + (b.type === 'gelir'
-                      ? '<div class="mt-1.5"><button type="button" data-id="' + esc(b.id) + '" onclick="sendDonorReceiptWhatsApp(this.getAttribute(\'data-id\'))" title="Hayırsevere WhatsApp ile Teşekkür & Alındı Makbuzu Gönder" class="text-[10px] font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 px-2 py-0.5 rounded-lg flex items-center space-x-1 ml-auto active:scale-95 transition-all"><span>💬 Teşekkür & Makbuz</span></button></div>'
-                      : '') +
-                    adminBtns + '</div>' : '') +
+          (adminBtns ? '<div class="pt-1 flex justify-end">' + adminBtns + '</div>' : '') +
         '</div>';
       }).join('');
     }
@@ -1446,16 +1468,26 @@
     }
 
     // --- ANA EKRAN ÇİZİCİ ---
-     {
+    function render() {
       var root = document.getElementById('root');
       if (!root) return;
 
       if (!state.currentUser) {
+        if (typeof document !== 'undefined' && document.body) {
+          document.body.classList.remove('modal-open');
+        }
         root.innerHTML = renderLoginView();
         return;
       }
 
-            var isAnyModalOpen = selectedAid || (isAdmin && editingAid) || (isAdmin && editingBudget) || (isAdmin && editingDonor) || (isAdmin && editingMember) || state.viewingPhotoUrl || state.changingPin;
+      var selectedAid = state.selectedAidId ? state.aids.find(function(a) { return String(a.id).trim() === String(state.selectedAidId).trim(); }) : null;
+      var editingAid = state.editingAidId ? state.aids.find(function(a) { return String(a.id).trim() === String(state.editingAidId).trim(); }) : null;
+      var editingBudget = state.editingBudgetId ? state.budget.find(function(b) { return String(b.id).trim() === String(state.editingBudgetId).trim(); }) : null;
+      var editingDonor = state.editingDonorId ? state.donors.find(function(d) { return String(d.id).trim() === String(state.editingDonorId).trim(); }) : null;
+      var editingMember = state.editingMemberId ? state.members.find(function(m) { return String(m.id).trim() === String(state.editingMemberId).trim(); }) : null;
+      var isAdmin = checkIsAdmin(state.currentUser);
+
+      var isAnyModalOpen = Boolean(selectedAid || (isAdmin && editingAid) || (isAdmin && editingBudget) || (isAdmin && editingDonor) || (isAdmin && editingMember) || state.viewingPhotoUrl || state.changingPin);
       if (typeof document !== 'undefined' && document.body) {
         if (isAnyModalOpen) {
           document.body.classList.add('modal-open');
@@ -1463,12 +1495,6 @@
           document.body.classList.remove('modal-open');
         }
       }
-var selectedAid = state.selectedAidId ? state.aids.find(function(a) { return String(a.id).trim() === String(state.selectedAidId).trim(); }) : null;
-      var editingAid = state.editingAidId ? state.aids.find(function(a) { return String(a.id).trim() === String(state.editingAidId).trim(); }) : null;
-      var editingBudget = state.editingBudgetId ? state.budget.find(function(b) { return String(b.id).trim() === String(state.editingBudgetId).trim(); }) : null;
-      var editingDonor = state.editingDonorId ? state.donors.find(function(d) { return String(d.id).trim() === String(state.editingDonorId).trim(); }) : null;
-      var editingMember = state.editingMemberId ? state.members.find(function(m) { return String(m.id).trim() === String(state.editingMemberId).trim(); }) : null;
-      var isAdmin = checkIsAdmin(state.currentUser);
 
       var bankaGelir = state.budget.filter(function(b) { return b.type === 'gelir' && b.channel === 'banka'; }).reduce(function(a, b) { return a + (Number(b.amount) || 0); }, 0);
       var bankaGider = state.budget.filter(function(b) { return b.type === 'gider' && b.channel === 'banka'; }).reduce(function(a, b) { return a + (Number(b.amount) || 0); }, 0);
@@ -1910,6 +1936,9 @@ var selectedAid = state.selectedAidId ? state.aids.find(function(a) { return Str
                     '<span class="font-extrabold text-sm font-display block ' + (b.type === 'gelir' ? 'text-emerald-700' : 'text-rose-600') + ' ' + (state.privacyMode ? 'filter blur-[4px] select-none hover:blur-none transition-all cursor-pointer' : '') + '">' +
                       (b.type === 'gelir' ? '+' : '-') + (Number(b.amount) || 0).toLocaleString('tr-TR') + ' ₺' +
                     '</span>' +
+                    (b.type === 'gelir'
+                      ? '<div class="mt-1.5"><button type="button" data-id="' + esc(b.id) + '" onclick="sendDonorReceiptWhatsApp(this.getAttribute(\'data-id\'))" title="Hayırsevere WhatsApp ile Teşekkür & Alındı Makbuzu Gönder" class="text-[10px] font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 px-2 py-0.5 rounded-lg flex items-center space-x-1 ml-auto active:scale-95 transition-all"><span>💬 Makbuz</span></button></div>'
+                      : '') +
                     adminBtns +
                   '</div>' +
                 '</div>' +
@@ -2438,7 +2467,7 @@ var selectedAid = state.selectedAidId ? state.aids.find(function(a) { return Str
                   : '<div class="text-[11px] text-slate-400 italic bg-slate-50 p-2 rounded-xl text-center">Bugünün ilk otomatik yedeği alınıyor...</div>'
                 ) +
               '</div>' +
-            '</div>' + +
+            '</div>' +
           '</div>';
         }
 
@@ -2589,6 +2618,12 @@ var selectedAid = state.selectedAidId ? state.aids.find(function(a) { return Str
             '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Telefon</label><input id="editAidPhone" type="tel" value="' + esc(editingAid.phone || '') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
             '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Açık Adres</label><textarea id="editAidAddress" rows="2" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-medium outline-none focus:bg-white">' + esc(editingAid.address || '') + '</textarea></div>' +
             '<div><div class="flex justify-between items-center mb-1"><label class="text-[11px] font-bold text-slate-500 uppercase">Harita Linki</label><div class="flex items-center space-x-1.5"><button type="button" onclick="getCurrentLocation(\'editAidMapsUrl\', this)" class="text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-lg font-bold hover:bg-emerald-100 active:scale-95">📍 Konumu Yenile</button><button type="button" onclick="generateMapLinkFromAddress(\'editAidMapsUrl\')" class="text-[10px] bg-blue-50 text-blue-900 border border-blue-200 px-2 py-0.5 rounded-lg font-bold hover:bg-blue-100 active:scale-95">🗺️ Adresten Üret</button></div></div><input id="editAidMapsUrl" value="' + esc(editingAid.mapsUrl || '') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-medium outline-none focus:bg-white" /></div>' +
+            '<div><label class="text-[11px] font-bold text-slate-500 uppercase block mb-1">Emanet Türü (İhtiyaç Kalemleri)</label><div class="grid grid-cols-2 gap-1.5 text-[11px] font-bold">' +
+              ['Gıda / Erzak (Yiyecek)', 'Nakit / Sadaka (Para)', 'Kışlık Yakacak (Odun-Kömür)', 'Kisve (Giyim / Kıyafet)', 'Şifa (Sağlık / İlaç)', 'Yetim Desteği'].map(function(cat) {
+                var hasCat = Array.isArray(editingAid.category) && editingAid.category.includes(cat);
+                return '<label class="flex items-center space-x-1.5 bg-slate-50 p-2 rounded-xl border border-slate-200 cursor-pointer"><input type="checkbox" name="editCats" value="' + esc(cat) + '" ' + (hasCat ? 'checked' : '') + ' class="accent-emerald-600 rounded" /><span>' + esc(cat) + '</span></label>';
+              }).join('') +
+            '</div></div>' +
             '<div><label class="text-[11px] font-bold text-slate-500 uppercase">İhtiyaç ve Durum Notları</label><textarea id="editAidNotes" rows="2" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-medium outline-none focus:bg-white">' + esc(editingAid.notes || '') + '</textarea></div>' +
             '<button type="submit" class="w-full bg-emerald-800 text-white font-extrabold text-xs py-3 rounded-xl font-display shadow-md">Değişiklikleri Kaydet ve E-Tabloya Gönder</button>' +
           '</form>' +
@@ -2991,6 +3026,10 @@ var selectedAid = state.selectedAidId ? state.aids.find(function(a) { return Str
         item.phone = document.getElementById('editAidPhone').value;
         item.address = document.getElementById('editAidAddress').value;
         item.mapsUrl = document.getElementById('editAidMapsUrl').value;
+        var editedCats = Array.from(document.querySelectorAll('input[name="editCats"]:checked')).map(function(el) { return el.value; });
+        if (editedCats.length > 0 || document.querySelectorAll('input[name="editCats"]').length > 0) {
+          item.category = editedCats;
+        }
         item.notes = document.getElementById('editAidNotes').value;
         item.updatedBy = state.currentUser.name;
         item.updatedAt = getTurkeyDateTime();
@@ -3183,7 +3222,12 @@ var selectedAid = state.selectedAidId ? state.aids.find(function(a) { return Str
       if (currentMember) currentMember.pin = newPin;
       state.currentUser.pin = newPin;
 
-      saveCacheItem('hare_user', state.currentUser);
+      try {
+        sessionStorage.setItem('hare_session_user', JSON.stringify(state.currentUser));
+        if (localStorage.getItem('hare_remember_me') === '1') {
+          saveCacheItem('hare_user', state.currentUser);
+        }
+      } catch(e) {}
       saveCacheItem('hare_cached_members', state.members);
 
       state.changingPin = false;
@@ -3900,10 +3944,13 @@ var selectedAid = state.selectedAidId ? state.aids.find(function(a) { return Str
     // ÇIKIŞ: KVKK GEREĞİ TELEFONDAKİ TÜM VERİLERİ SIFIRLAR
     window.logout = function() {
       state.currentUser = null;
-      state.aids = [];
-      state.budget = [];
-      state.donors = [];
-      state.logs = [];
+      state.selectedAidId = null;
+      state.editingAidId = null;
+      state.editingBudgetId = null;
+      state.editingDonorId = null;
+      state.editingMemberId = null;
+      state.viewingPhotoUrl = null;
+      state.changingPin = false;
       try {
         localStorage.removeItem('hare_user');
         localStorage.removeItem('hare_remember_me');
@@ -4050,7 +4097,7 @@ var selectedAid = state.selectedAidId ? state.aids.find(function(a) { return Str
     // İlk açılışta geçmiş tamponunu oluştur (Android canGoBack() her zaman açık kalsın)
     try {
       history.replaceState({ hareNav: 'root' }, '');
-      for (var b = 0; b < 4; b++) {
+      for (let histIdx = 0; histIdx < 4; histIdx++) {
         history.pushState({ hareNav: 'guard' }, '');
       }
     } catch(e) {}

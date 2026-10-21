@@ -351,18 +351,63 @@ Bu belgede, Hâre İnsani Yardım ve Ekip Koordinasyon Platformu'nda yapılan so
 ### 23. 🔒 Oturum Güvenliği: Uygulama Kapatıldığında / Arka Plandan Silindiğinde PIN İsteme
 
 * **Karşılaşılan Durum:**
+
   * Uygulama açılışında oturum verisi kalıcı olarak `localStorage` içinde saklandığı için, uygulama kapatılsa veya arka plandan silinse dahi tekrar açıldığında PIN sormadan doğrudan ana ekrana giriyordu.
+
   * Bu durum hem mobil APK'da hem de web sürümünde telefon başkalarının eline geçtiğinde güvenlik ve mahremiyet riski oluşturuyordu.
 
 * **Yapılan Düzeltmeler ve Güvenlik İyileştirmeleri:**
+
   1. **Geçici Oturum Mimarisi (`sessionStorage`):**
+
      * Aktif oturum artık kalıcı `localStorage` yerine oturum bazlı `sessionStorage` üzerinde tutulur.
+
      * Uygulama tamamen kapatıldığında, arka plandan silindiğinde veya web tarayıcısı kapatıldığında oturum otomatik olarak sonlanır.
+
      * Uygulama yeniden başlatıldığında gönüllüden güvenlik amacıyla 4 haneli PIN kodunu girmesi istenir.
+
   2. **Akıllı Gönüllü Hatırlama:**
+
      * Giriş ekranında en son giriş yapan gönüllü kardeşimizin ismi otomatik olarak seçili gelir. Böylece her seferinde listeden isim aramak zorunda kalmazsınız; yalnızca 4 haneli PIN kodunuzu girip anında giriş yapabilirsiniz.
+
   3. **İsteğe Bağlı "Oturumu Sürekli Açık Tut (Beni Hatırla)" Seçeneği:**
+
      * Giriş formuna isteğe bağlı bir onay kutusu eklendi.
+
      * Yalnızca kullanıcı bu kutuyu bizzat işaretlerse kalıcı oturum açılır; işaretlenmediği takdirde uygulama her kapatılıp açıldığında PIN sorarak tam güvenlik sağlar.
+
   4. **Sayfa Yenilemede (F5) Kesintisiz Çalışma:**
+
      * Web sürümünde çalışırken yapılan sayfa yenilemelerinde (F5) veya filtre değişimlerinde `sessionStorage` sayesinde oturum kapanmaz; yalnızca uygulama veya sekme tamamen kapatıldığında kilitlenir.
+
+### 24. 🔍 Tam Kapsamlı Otomatik Kod ve Çalışma Zamanı Denetimi (61 Fonksiyon & 50+ Ekran Simülasyonu)
+
+Uygulamanın tamamı Node.js sanal tarayıcı (VM) ortamında uçtan uca simüle edilerek tüm sekmeler, alt sekmeler, modallar ve 61 ayrı etkileşim fonksiyonu otomatik olarak test edildi. Tespit edilip tek seferde giderilen tüm gizli hatalar:
+
+1. **Çıkış (`logout`) Sonrası Kayıtların Silinmesi Hatası (Kritik Veri Kaybı):**
+   * **Sebep:** `logout()` fonksiyonu hafızadaki `state.aids = []`, `state.budget = []` dizilerini sıfırlıyordu. Kullanıcı tekrar giriş yaptığında sunucu eşitlemesi henüz tamamlanmadan bir işlem yaparsa (veya PIN değiştirirse), `pushToGoogleSheet()` sunucuya boş dizi (`[]`) gönderip E-Tablo'daki kayıtları silebiliyordu.
+   * **Çözüm:** Çıkış yapıldığında yerel önbellek dizilerinin sıfırlanması kaldırıldı (oturum kapalıyken zaten ekranda hiçbir veri gösterilmez). Böylece E-Tablo'ya yanlışlıkla boş liste gönderilmesi tamamen engellendi.
+2. **Hayırseverler Listesinde Gizli `b.type` Değişken Hatası ve Görünmeyen Makbuz Butonu:**
+   * **Sebep:** "💬 Teşekkür & Makbuz" butonu (`sendDonorReceiptWhatsApp`), yanlışlıkla `renderDonorsListHTML` (bağışçı kartları) içine `b.type === 'gelir'` koşuluyla eklenmişti. O döngüde değişken `d` olduğu ve `b` global döngüden `4` değerini aldığı için buton hiçbir ekranda görünmüyordu.
+   * **Çözüm:** Hatalı referans `renderDonorsListHTML` içinden temizlendi ve gerçek yeri olan Sandık (`budgetListHTML`) gelir kayıtlarının içine eklendi.
+3. **Ekip & Yönetim Sekmesindeki `NaN` Yazısı Hatası:**
+   * **Sebep:** Otomatik yedekler kartının kapanışında `'</div>' + + '</div>'` şeklinde çift artı (`+ +`) operatörü kalmıştı; JavaScript ikinci `+'</div>'` ifadesini sayıya çevirmeye çalışıp ekrana `NaN` basıyordu.
+   * **Çözüm:** Çift `+` operatörü temizlendi.
+4. **Emanet Devirlerinin (`transfers`) Sayfa Yenilemede Sıfırlanması:**
+   * **Sebep:** `state` nesnesi içinde 372. satırda `transfers: getCachedList('hare_cached_transfers')` tanımlanmışken, 391. satırda mükerrer olarak `transfers: []` yazıldığı için önbellekteki devirler her açılışta eziliyordu.
+   * **Çözüm:** Mükerrer `transfers: []` satırı kaldırıldı.
+5. **Modal Açıldığında Arka Plan Kaydırma Kilidinin (`isAnyModalOpen`) Çalışmaması:**
+   * **Sebep:** `render()` fonksiyonu içinde `isAnyModalOpen` değişkeni, `selectedAid` ve `editingAid` değişkenleri tanımlanmadan *önce* hesaplanıyordu (`undefined` dönüyordu).
+   * **Çözüm:** Değişken tanımlamaları `isAnyModalOpen` kontrolünün üstüne alındı; artık herhangi bir pencere açıldığında arka plan kaydırması tam kilitlenir.
+6. **Sandık, Devirler ve Bağışçılar İçin Çift Taraflı Akıllı Eşitleme (`mergeSafeList`):**
+   * **Sebep:** Çift taraflı koruma yalnızca `aids` (Haneler) için vardı; `budget`, `transfers` ve `donors` listeleri sunucudan gelen veriyle doğrudan eziliyordu. Ayrıca sunucuda `deliveryPhotos` sütunu eksikse yereldeki teslimat fotoğrafları silinebiliyordu.
+   * **Çözüm:** Tüm listeler (`aids`, `budget`, `transfers`, `donors`) `mergeSafeList` motoruna bağlandı; yerel teslimat fotoğrafları, kategoriler ve henüz sunucuya yansımamış yeni kayıtlar hiçbir koşulda kaybolmaz.
+7. **Temizle (`🧹`) Butonunda Silinen Kayıtların Geri Gelmesi:**
+   * **Sebep:** `clearCacheAndResync` içinde `localStorage.removeItem('hare_deleted_ids')` çağrıldığı için daha önce silinmiş kayıtların ID listesi sıfırlanıyordu.
+   * **Çözüm:** Silinen ID listesinin (`hare_deleted_ids`) temizlenmesi kaldırıldı; silinen kayıtlar asla geri gelmez.
+8. **Hane Düzenleme (`editAid`) Penceresinde İhtiyaç Kalemleri (`category`) Eksikliği:**
+   * **Sebep:** Yeni hane eklerken seçilen ihtiyaç kalemleri (Gıda, Nakit, Yakacak vb.), hane düzenleme penceresinde bulunmuyordu.
+   * **Çözüm:** Hane düzenleme penceresine ihtiyaç kalemleri onay kutuları eklendi.
+9. **PIN Değiştirme Sonrası Kalıcı Oturum Sızıntısı:**
+   * **Sebep:** `handleSaveChangePin` fonksiyonu "Beni Hatırla" kapalı olsa bile `localStorage` içine `hare_user` yazıyordu.
+   * **Çözüm:** Yalnızca `sessionStorage` güncellenir; kalıcı hafızaya sadece "Beni Hatırla" açıkken yazılır.
