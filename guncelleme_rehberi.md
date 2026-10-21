@@ -203,17 +203,27 @@ Bu belgede, Hâre İnsani Yardım ve Ekip Koordinasyon Platformu'nda yapılan so
 ### 18. 🗺️ Harita ve Canlı Navigasyon Sistemi (E-Tablo Entegrasyonu ve Kesintisiz Çift Kademeli Açılış)
 
 * **E-Tablo ile Entegrasyon Durumu:**
+
   * **Evet, kesinlikle entegredir.** Hanelerin adresleri ve harita konumları (`mapsUrl`) Google E-Tablonuzdaki **`Haneler`** sayfasında `G` sütununda (`mapsUrl`) saklanmaktadır.
+
   * Formdan kaydedilen veya güncellenen GPS koordinatları (`https://maps.google.com/?q=LAT,LON`) ya da adresten üretilen harita linkleri anında E-Tabloya yazılır ve diğer tüm telefonların ekranına eşitlenir.
 
 * **Canlı Navigasyon Neden Açılmıyordu ve Nasıl Çözüldü?**
+
   1. **Paket Kilitli Intent Hatası:** Eski kodda Android paket ismi zorlaması (`package=com.google.android.apps.maps`) bulunuyordu. Android WebView veya TrebEdit gibi kısıtlı ortamlarda bu paket intent'i doğrudan çözülemeyince Android sistemi haritayı açmak yerine kullanıcıyı Google Play Store'daki indirme/güncelleme sayfasına atıyordu.
+
   2. **Doğrudan Yerel Protokol (`google.navigation:`):** Play Store'a atma hatasını önlemek için `google.navigation:q=LAT,LON&mode=d` protokolü devreye alındı. Bu şema Android'in yerel navigasyon motorudur.
+
   3. **Çift Kademeli Güvenli Fallback (Kesintisiz Navigasyon Güvencesi):**
+
      * Bazı Android WebView tarayıcıları veya cihaz güvenlik ayarları `google.navigation:` protokolünü yakalamakta sessiz kalabilir.
+
      * Bu durumu önlemek için sisteme akıllı bir **otomatik geçiş (fallback)** eklendi:
+
      * Tıklandığında önce doğrudan yerel navigasyon şeması denenir.
+
      * Eğer 600 milisaniye içinde cihazın harita uygulaması ön plana çıkmazsa, sistem beklemeden otomatik olarak Google Haritalar'ın doğrudan yol tarifi web/uygulama motoruna (`https://www.google.com/maps/dir/?api=1&destination=...`) geçiş yapar.
+
      * Böylece cihazınız ne olursa olsun (Android, iOS, eski/yeni WebView, TrebEdit) navigasyon butonu **asla cevapsız kalmaz ve asla Google Play Store'a atmaz; kapıya kadar yol tarifini anında açar.**
 
 ### 19. 📱 Sayfa Kaydırma (Aşağı-Yukarı Hareket) ve Geri Tuşunda Uygulamadan Atma Çözümü
@@ -245,41 +255,85 @@ Bu belgede, Hâre İnsani Yardım ve Ekip Koordinasyon Platformu'nda yapılan so
        * Hane Ekleme, Sandık, Hayırsever veya Gönüllü sekmesindeyse **doğrudan Haneler ana sayfasına dönülür**.
 
        * Zaten Haneler ana sayfasındaysa **uygulamadan kesinlikle atmaz**; ekranda *"ℹ️ Çıkış yapmak için sağ üstteki 🚪 butonunu kullanabilirsiniz"* uyarısı verir ve kullanıcıyı güvenle uygulamada tutar.
+
 ### 20. 🛡️ Eklenen Kayıtların Kendi Kendine Silinmesini Önleme (Çift Taraflı Eşitleme Koruması)
 
 * **Karşılaşılan Sorun (188540.mp4 & 188541.jpg Analizi):**
+
   * Kullanıcı yeni bir hane ("Mustafa Amca") ekledikten ve teslimat fotoğrafını yükledikten sonra, üstteki Canlı eşitlemeye basıldığında veya arka plandaki 30 saniyelik otomatik eşitleme çalıştığında hane listesi sıfırlanıyor ve ekranda *"Henüz kayıtlı hane bulunmuyor (0 Hane)"* yazıyordu.
-  * **Teknik Sebebi:** 
+
+  * **Teknik Sebebi:**
+
     1. Eski sistemde sunucudan gelen liste (`data.aids`), cihazın yerel hafızasındaki (`state.aids`) kayıtların üzerine doğrudan yazılıyordu. Google Apps Script sunucusunda o an bir gecikme olduğunda veya kayıt sunucuya yazılırken arka plan eşitlemesi boş/eski liste döndürdüğünde, cihazda henüz kaydedilmiş yeni hane silinmiş gibi eziliyordu.
+
     2. Ayrıca üst barda bulunan süpürge (`🧹`) butonu, cihazdaki yerel önbellek listesini (`hare_cached_aids`) de siliyordu.
 
 * **Uygulanan Kesin Çözümler:**
+
   1. **Çift Taraflı Birleştirme Motoru (Two-Way Smart Merge):**
+
      * Sunucudan veri çekildiğinde (`syncFromGoogleSheet`), yereldeki yeni kayıtlar ezilmez.
+
      * Cihazda bulunan fakat sunucuya henüz yansımamış taze kayıtlar korunur ve sunucudan gelen listeyle akıllıca harmanlanır (`localOnly.concat(serverAids)`).
+
      * Böylece internet kopsa, sunucu gecikse veya arka planda eşitleme çalışsa dahi eklediğiniz hiçbir kayıt kendi kendine silinmez.
+
   2. **Temizle (🧹) Butonu İyileştirmesi:**
+
      * Süpürge butonu artık kullanıcının cihazındaki gerçek kayıtları temizlemez; yalnızca tarayıcı ağ önbelleğini yeniler ve güvenli eşitleme yapar.
+
   3. **Navigasyon ve Harita Kesin Tetikleyicisi:**
+
      * "🧭 Canlı Navigasyon" ve "🗺️ Haritada Gör" butonları doğrudan evrensel Google Haritalar `https://www.google.com/maps/dir/?api=1&destination=...` motoruna bağlanarak WebView izin kısıtlamalarına takılmadan harita uygulamasını garantili olarak açar.
 
 ### 21. 🗺️ Harita ve Navigasyon Kökten Çözümü (Google/Yandex Seçici & Geri Tuşu Koruması)
 
 * **Karşılaşılan Sorunlar (188567.mp4 Video Analizi):**
+
   1. **Google Haritalar "Tarayıcınızı Güncelleyin" Hatası:** Hane detayından "Haritada Gör" veya "Canlı Navigasyon" butonuna basıldığında WebView arka planda `https://www.google.com/maps/...` web adresini açmaya çalışıyor; Google Maps Web motoru Android WebView'ı desteklemediği için `support.google.com/maps/answer/...` sayfasına ("Google Haritalar'ı kullanmak için tarayıcınızı güncelleyin") yönlendiriyordu.
+
   2. **Geri Tuşunun Uygulamadan Atması:** WebView'in adresi `index.html` dosyasından Google Yardım web sayfasına dönüştüğü için Hâre uygulamasının JavaScript belleği ve `popstate` dinleyicileri tamamen devreden çıkıyor; kullanıcı geri tuşuna veya hareketine bastığında Android işletim sistemi uygulamayı kapatıp doğrudan ana ekrana (launcher) fırlatıyordu.
 
 * **Uygulanan Kesin Çözümler:**
+
   1. **🧭 Hâre Özel Harita ve Navigasyon Seçici Modalı (Action Sheet):**
+
      * "🗺️ Haritada Gör" veya "🧭 Canlı Navigasyon" butonuna dokunulduğunda doğrudan web sayfasına yönlenmek yerine Hâre içerisinde şık bir alt menü açılır:
+
        * 🟢 **Google Haritalar:** Canlı sürüş rotasını Google Maps uygulamasında doğrudan başlatır (`google.navigation:q=lat,lon&mode=d`).
+
        * 🟡 **Yandex Navigasyon:** Türkiye sahasında en çok tercih edilen Yandex Navi uygulamasında rotayı açar (`yandexnavi://build_route_on_map?lat_to=lat&lon_to=lon`).
+
        * 🗺️ **Sistem Haritası (Cihaz Seçimi):** Android'in yerel harita seçicisini açar (`geo:lat,lon?q=lat,lon`).
+
        * 📋 **Konumu Kopyala:** Koordinat ve açık adresi tek dokunuşla panoya kopyalar (WhatsApp'a veya başka haritalara yapıştırmak için).
+
   2. **🛡️ Sayfayı Asla Değiştirmeyen Gizli Iframe Dispatch Motoru:**
+
      * Harita protokolleri (`google.navigation:`, `yandexnavi:`, `geo:`) artık sayfa adresini değiştirmeden görünmez bir arka plan kanalı üzerinden tetiklenir.
+
      * Bu sayede WebView asla Google Haritalar web sitesine veya "Tarayıcınızı güncelleyin" sayfasına yönlenmez; Hâre uygulaması daima ekranda canlı kalır.
+
   3. **🔙 Kesintisiz Geri Tuşu ve 2 Kere Basarak Çıkış Güvencesi:**
+
      * Kullanıcının ekrana her dokunuşunda (`click` olayı) Android WebView geçmiş tamponu (`ensureHistoryBuffer`) taze tutulur; Android'in `canGoBack()` yetkisi hiçbir zaman tükenmez.
+
      * Geri tuşuna basıldığında hiyerarşik olarak önce açık olan Harita Seçici, Hane Detayı veya alt sekmeler sırayla kapatılır.
+
      * Sadece ve sadece ana ekranda hiçbir pencere açık değilken 2 saniye içinde art arda iki kez geri basıldığında uygulama kapanır; kazara tek basışta fırlatma sorunu tamamen ortadan kalktı.
+
+### 22. 🗺️ Harita Sadeleştirmesi: Canlı Navigasyon, Google & Yandex Kaldırıldı — Saf Sistem Haritası
+
+* **Kullanıcı Talebi:**
+  * "Canlı Navigasyon" butonu ve bölümü komple kaldırıldı.
+  * "Haritada Gör" bölümü korundu; içinden Google Haritalar web yönlendirmesi ve Yandex Navigasyon bölümleri tamamen çıkartıldı.
+
+* **Yapılan Sadeleştirme ve İyileştirmeler:**
+  1. **"🧭 Canlı Navigasyon" Tamamen Kaldırıldı:**
+     * Hane detay kartındaki ikili navigasyon butonları sadeleştirildi; karmaşıklık yaratan "Canlı Navigasyon" eylemi ve ilgili yönlendirmeler tamamen iptal edildi.
+  2. **"🗺️ Haritada Gör" — Doğrudan Yerel Sistem Haritası (`geo:`):**
+     * Google Haritalar web sitesine gitme veya Yandex Navi açma zorlaması kaldırıldı.
+     * Artık "🗺️ Haritada Gör" butonuna basıldığında Android'in yerel sistem harita protokolü (`geo:lat,lon?q=lat,lon(Hane)`) doğrudan arka planda tetiklenir; telefonunuzda yüklü varsayılan harita uygulaması (Google Haritalar uygulaması veya sistem harita seçicisi) doğrudan açılır.
+     * Tarayıcınız asla `support.google.com` adresine ("Tarayıcınızı güncelleyin") yönlenmez; Hâre uygulaması kendi sayfasında canlı kalır.
+  3. **📋 "Konumu Kopyala" Butonu:**
+     * "Haritada Gör" butonunun yanına pratik bir "📋 Konumu Kopyala" butonu eklendi. Tek dokunuşla hanenin enlem/boylam koordinatlarını ve açık adresini panoya kopyalayarak WhatsApp'a veya başka harita programlarına kolayca yapıştırabilirsiniz.
