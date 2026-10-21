@@ -185,3 +185,18 @@ Bu belgede, Hâre İnsani Yardım ve Ekip Koordinasyon Platformu'nda yapılan so
      - Yüksekliği: `max(1.5rem, calc(env(safe-area-inset-bottom, 0px) + 0.6rem))` (asgari 24px - 34px).
      - Sonuç: Android'in 3 sanal gezinti tuşu (üçgen geri, daire ana ekran, kare son uygulamalar) veya yatay hareket çizgisi tamamen bu zümrüt yeşili zemin üzerinde kalır; yukarıdaki beyaz menü butonlarıyla ve yazılarıyla asla çakışmaz.
   3. **İçerik Kaydırma Boşluğu:** Sayfa altlarındaki son kayıtların menü arkasında kaybolmaması için ana gövde alt boşluğu `pb-36` seviyesinde tutuldu.
+
+---
+
+### 18. 🗺️ Harita Butonunda "Tarayıcınızı Güncelleyin" / Play Store Döngüsünün Kökten Çözümü
+- **Videodaki Sorun (188454.mp4 Analizi):**
+  - Kullanıcı hane detay penceresinde **"Google Haritalar'da Aç / Yol Tarifi"** butonuna bastığında; Android WebView (TrebEdit / APK) `https://www.google.com/maps/...` bağlantısını `target="_blank"` ile kendi gömülü iç tarayıcısında açmaya çalışıyordu.
+  - Google Haritalar web sürümü, kısıtlı mobil WebView tarayıcılarını desteklemediği için haritayı yüklemeyi reddedip ekrana **"Google Haritalar'ı kullanmak için tarayıcınızı güncelleyin"** uyarısını çıkarıyor ve kullanıcıyı Play Store indirme sayfasına yönlendiriyordu. Play Store'da Google Haritalar zaten kurulu olduğu için kullanıcı haritaya ulaşamadan çıkmak zorunda kalıyordu.
+- **Uygulanan Çözüm:**
+  1. **Doğrudan Yerel Uygulama Intent'i (Android Intent & geo URI):**
+     - Web URL'si yerine doğrudan cihazda yüklü olan Google Haritalar uygulamasını çalıştıran `intent://maps.google.com/...#Intent;scheme=https;package=com.google.android.apps.maps;...` ve `geo:` protokolü entegre edildi.
+     - `target="_blank"` kaldırıldı; WhatsApp ve telefon arama mekanizmasında olduğu gibi Intent doğrudan Android işletim sistemine iletildi.
+  2. **İki Ayrı Net Eylem Butonu:**
+     - **🗺️ Haritada Gör:** Hanenin konumunu Google Haritalar uygulamasında işaretli pin olarak açar.
+     - **🧭 Canlı Navigasyon:** Saha gönüllüsünün yola çıkıp hane kapısına kadar sesli navigasyonla gitmesi için Google Haritalar'ın canlı yol tarifini doğrudan başlatır (`dirflg=d`).
+  3. **Çoklu Platform Uyumluluğu:** Android'de yerel Google Haritalar uygulaması, iOS cihazlarda Apple Haritalar (`maps://`), masaüstünde ise web tarayıcı sürümü otomatik olarak devreye girer.

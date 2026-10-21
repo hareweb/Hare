@@ -2479,7 +2479,10 @@
               '<div class="flex justify-between items-center"><span class="font-bold text-slate-700 block uppercase text-[10px]">Açık Adres ve Tarif:</span>' +
               (selectedAid.mapsUrl ? '<span class="text-[9px] font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded">📍 GPS Kayıtlı</span>' : '<span class="text-[9px] font-bold text-slate-400 bg-slate-200 px-1.5 py-0.5 rounded">Adres Arama</span>') + '</div>' +
               '<p class="text-slate-700 font-medium leading-relaxed">' + maskAddress(selectedAid.address) + '</p>' +
-              '<button type="button" data-id="' + esc(selectedAid.id) + '" onclick="openMapForAid(this.getAttribute(\'data-id\'))" class="w-full bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-200 py-2.5 rounded-xl text-xs font-extrabold flex items-center justify-center space-x-1.5 shadow-sm active:scale-95 transition-all mt-1"><span>🗺️ Google Haritalar\'da Aç / Yol Tarifi</span></button>' +
+              '<div class="grid grid-cols-2 gap-2 mt-1.5">' +
+  '<button type="button" data-id="' + esc(selectedAid.id) + '" onclick="openMapForAid(this.getAttribute(\'data-id\'), \'map\')" class="bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-200 py-2.5 rounded-xl text-xs font-extrabold flex items-center justify-center space-x-1 shadow-sm active:scale-95 transition-all"><span>🗺️ Haritada Gör</span></button>' +
+  '<button type="button" data-id="' + esc(selectedAid.id) + '" onclick="openMapForAid(this.getAttribute(\'data-id\'), \'nav\')" class="bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl text-xs font-extrabold flex items-center justify-center space-x-1 shadow-sm active:scale-95 transition-all"><span>🧭 Canlı Navigasyon</span></button>' +
+'</div>' +
             '</div>' +
 
             // TESPİT NOTLARI
@@ -3534,41 +3537,81 @@
       }
     };
 
-    window.openMapForAid = function(id) {
+    window.openMapForAid = function(id, mode) {
       var targetId = String(id || '').trim();
       var item = state.aids.find(function(a) { return String(a.id).trim() === targetId; });
       if (!item) return;
 
       var rawUrl = (item.mapsUrl || '').trim();
-      var coordsMatch = rawUrl.match(/q=([-\d.]+),([-\d.]+)/) || rawUrl.match(/@([-\d.]+),([-\d.]+)/);
-      var navUrl = '';
+      var coordsMatch = rawUrl.match(/q=([-\d.]+),([-\d.]+)/) || 
+                        rawUrl.match(/@([-\d.]+),([-\d.]+)/) ||
+                        rawUrl.match(/([-\d.]+)\s*,\s*([-\d.]+)/);
+
+      var isAndroid = /android/i.test(navigator.userAgent || '');
+      var isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent || '');
+
+      var targetUri = '';
 
       if (coordsMatch) {
         var lat = coordsMatch[1];
         var lon = coordsMatch[2];
-        // 🗺️ Android & iOS cihazlarda doğrudan Google Haritalar uygulamasını (Navigasyon) açar
-        navUrl = 'https://www.google.com/maps/dir/?api=1&destination=' + lat + ',' + lon;
-      } else if (rawUrl && (rawUrl.indexOf('http://') === 0 || rawUrl.indexOf('https://') === 0)) {
-        navUrl = rawUrl;
+        var label = encodeURIComponent(item.name || 'Hane Konumu');
+
+        if (mode === 'nav') {
+          // 🧭 Canlı Navigasyon Başlat (Android Google Maps Uygulamasını Doğrudan Açar)
+          if (isAndroid) {
+            targetUri = 'intent://maps.google.com/maps?daddr=' + lat + ',' + lon + 
+                        '&dirflg=d#Intent;scheme=https;package=com.google.android.apps.maps;' +
+                        'S.browser_fallback_url=' + encodeURIComponent('google.navigation:q=' + lat + ',' + lon) + ';end';
+          } else if (isIOS) {
+            targetUri = 'maps://?daddr=' + lat + ',' + lon + '&dirflg=d';
+          } else {
+            targetUri = 'https://www.google.com/maps/dir/?api=1&destination=' + lat + ',' + lon;
+          }
+        } else {
+          // 🗺️ Harita Üzerinde Pini ve Konumu Göster
+          if (isAndroid) {
+            targetUri = 'intent://maps.google.com/maps?q=' + lat + ',' + lon + '(' + label + ')' +
+                        '#Intent;scheme=https;package=com.google.android.apps.maps;' +
+                        'S.browser_fallback_url=' + encodeURIComponent('geo:' + lat + ',' + lon + '?q=' + lat + ',' + lon + '(' + label + ')') + ';end';
+          } else if (isIOS) {
+            targetUri = 'maps://?q=' + label + '&ll=' + lat + ',' + lon;
+          } else {
+            targetUri = 'https://www.google.com/maps/search/?api=1&query=' + lat + ',' + lon;
+          }
+        }
       } else {
+        // Koordinat yoksa formdaki Mahalle, İlçe ve Şehir adresiyle arama yap
         var parts = [item.address, item.neighborhood, item.district, item.city].filter(function(x) { return x && String(x).trim().length > 0; });
-        var query = parts.join(', ') || item.name || '';
-        navUrl = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(query);
+        var query = parts.join(', ') || item.name || 'Kayseri';
+        var encodedQuery = encodeURIComponent(query);
+
+        if (isAndroid) {
+          targetUri = 'intent://maps.google.com/maps?q=' + encodedQuery +
+                      '#Intent;scheme=https;package=com.google.android.apps.maps;' +
+                      'S.browser_fallback_url=' + encodeURIComponent('geo:0,0?q=' + encodedQuery) + ';end';
+        } else if (isIOS) {
+          targetUri = 'maps://?q=' + encodedQuery;
+        } else {
+          targetUri = 'https://www.google.com/maps/search/?api=1&query=' + encodedQuery;
+        }
       }
 
       pushNavState('external');
+
+      // 🛡️ KRİTİK: target="_blank" KULLANILMAZ!
+      // WebView'in harita linkini iç tarayıcıda açmasını ve Google Haritalar web sürümünün 
+      // "Tarayıcınızı güncelleyin" hatası vermesini önlemek için doğrudan yerel Android Intent'i tetiklenir.
       try {
         var a = document.createElement('a');
-        a.href = navUrl;
-        a.target = '_blank';
-        a.rel = 'noopener noreferrer';
+        a.href = targetUri;
         document.body.appendChild(a);
         a.click();
         setTimeout(function() {
           if (a && a.parentNode) a.parentNode.removeChild(a);
         }, 300);
       } catch(e) {
-        window.location.href = navUrl;
+        window.location.href = targetUri;
       }
     };
 
