@@ -262,3 +262,24 @@ Bu belgede, Hâre İnsani Yardım ve Ekip Koordinasyon Platformu'nda yapılan so
      * Süpürge butonu artık kullanıcının cihazındaki gerçek kayıtları temizlemez; yalnızca tarayıcı ağ önbelleğini yeniler ve güvenli eşitleme yapar.
   3. **Navigasyon ve Harita Kesin Tetikleyicisi:**
      * "🧭 Canlı Navigasyon" ve "🗺️ Haritada Gör" butonları doğrudan evrensel Google Haritalar `https://www.google.com/maps/dir/?api=1&destination=...` motoruna bağlanarak WebView izin kısıtlamalarına takılmadan harita uygulamasını garantili olarak açar.
+
+### 21. 🗺️ Harita ve Navigasyon Kökten Çözümü (Google/Yandex Seçici & Geri Tuşu Koruması)
+
+* **Karşılaşılan Sorunlar (188567.mp4 Video Analizi):**
+  1. **Google Haritalar "Tarayıcınızı Güncelleyin" Hatası:** Hane detayından "Haritada Gör" veya "Canlı Navigasyon" butonuna basıldığında WebView arka planda `https://www.google.com/maps/...` web adresini açmaya çalışıyor; Google Maps Web motoru Android WebView'ı desteklemediği için `support.google.com/maps/answer/...` sayfasına ("Google Haritalar'ı kullanmak için tarayıcınızı güncelleyin") yönlendiriyordu.
+  2. **Geri Tuşunun Uygulamadan Atması:** WebView'in adresi `index.html` dosyasından Google Yardım web sayfasına dönüştüğü için Hâre uygulamasının JavaScript belleği ve `popstate` dinleyicileri tamamen devreden çıkıyor; kullanıcı geri tuşuna veya hareketine bastığında Android işletim sistemi uygulamayı kapatıp doğrudan ana ekrana (launcher) fırlatıyordu.
+
+* **Uygulanan Kesin Çözümler:**
+  1. **🧭 Hâre Özel Harita ve Navigasyon Seçici Modalı (Action Sheet):**
+     * "🗺️ Haritada Gör" veya "🧭 Canlı Navigasyon" butonuna dokunulduğunda doğrudan web sayfasına yönlenmek yerine Hâre içerisinde şık bir alt menü açılır:
+       * 🟢 **Google Haritalar:** Canlı sürüş rotasını Google Maps uygulamasında doğrudan başlatır (`google.navigation:q=lat,lon&mode=d`).
+       * 🟡 **Yandex Navigasyon:** Türkiye sahasında en çok tercih edilen Yandex Navi uygulamasında rotayı açar (`yandexnavi://build_route_on_map?lat_to=lat&lon_to=lon`).
+       * 🗺️ **Sistem Haritası (Cihaz Seçimi):** Android'in yerel harita seçicisini açar (`geo:lat,lon?q=lat,lon`).
+       * 📋 **Konumu Kopyala:** Koordinat ve açık adresi tek dokunuşla panoya kopyalar (WhatsApp'a veya başka haritalara yapıştırmak için).
+  2. **🛡️ Sayfayı Asla Değiştirmeyen Gizli Iframe Dispatch Motoru:**
+     * Harita protokolleri (`google.navigation:`, `yandexnavi:`, `geo:`) artık sayfa adresini değiştirmeden görünmez bir arka plan kanalı üzerinden tetiklenir.
+     * Bu sayede WebView asla Google Haritalar web sitesine veya "Tarayıcınızı güncelleyin" sayfasına yönlenmez; Hâre uygulaması daima ekranda canlı kalır.
+  3. **🔙 Kesintisiz Geri Tuşu ve 2 Kere Basarak Çıkış Güvencesi:**
+     * Kullanıcının ekrana her dokunuşunda (`click` olayı) Android WebView geçmiş tamponu (`ensureHistoryBuffer`) taze tutulur; Android'in `canGoBack()` yetkisi hiçbir zaman tükenmez.
+     * Geri tuşuna basıldığında hiyerarşik olarak önce açık olan Harita Seçici, Hane Detayı veya alt sekmeler sırayla kapatılır.
+     * Sadece ve sadece ana ekranda hiçbir pencere açık değilken 2 saniye içinde art arda iki kez geri basıldığında uygulama kapanır; kazara tek basışta fırlatma sorunu tamamen ortadan kalktı.

@@ -398,6 +398,7 @@
       transferChannel: 'elden',
       autoBackups: [],
       changingPin: false,
+      viewingMapAidId: null,
       kasaCategoryFilter: 'Tümü' /* İnfak kategori filtresi */
     };
 
@@ -480,6 +481,7 @@
       state.editingDonorId = null;
       state.editingMemberId = null;
       state.changingPin = false;
+      state.viewingMapAidId = null;
     }
 
     // =========================================================================
@@ -1432,7 +1434,7 @@
         return;
       }
 
-            var isAnyModalOpen = selectedAid || (isAdmin && editingAid) || (isAdmin && editingBudget) || (isAdmin && editingDonor) || (isAdmin && editingMember) || state.viewingPhotoUrl || state.changingPin;
+            var isAnyModalOpen = selectedAid || (isAdmin && editingAid) || (isAdmin && editingBudget) || (isAdmin && editingDonor) || (isAdmin && editingMember) || state.viewingPhotoUrl || state.changingPin || state.viewingMapAidId;
       if (typeof document !== 'undefined' && document.body) {
         if (isAnyModalOpen) {
           document.body.classList.add('modal-open');
@@ -2519,8 +2521,8 @@ var selectedAid = state.selectedAidId ? state.aids.find(function(a) { return Str
               (selectedAid.mapsUrl ? '<span class="text-[9px] font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded">📍 GPS Kayıtlı</span>' : '<span class="text-[9px] font-bold text-slate-400 bg-slate-200 px-1.5 py-0.5 rounded">Adres Arama</span>') + '</div>' +
               '<p class="text-slate-700 font-medium leading-relaxed">' + maskAddress(selectedAid.address) + '</p>' +
               '<div class="grid grid-cols-2 gap-2 mt-1.5">' +
-  '<button type="button" data-id="' + esc(selectedAid.id) + '" onclick="openMapForAid(this.getAttribute(\'data-id\'), \'map\')" class="bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-200 py-2.5 rounded-xl text-xs font-extrabold flex items-center justify-center space-x-1 shadow-sm active:scale-95 transition-all"><span>🗺️ Haritada Gör</span></button>' +
-  '<button type="button" data-id="' + esc(selectedAid.id) + '" onclick="openMapForAid(this.getAttribute(\'data-id\'), \'nav\')" class="bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl text-xs font-extrabold flex items-center justify-center space-x-1 shadow-sm active:scale-95 transition-all"><span>🧭 Canlı Navigasyon</span></button>' +
+  '<button type="button" data-id="' + esc(selectedAid.id) + '" onclick="openMapModal(this.getAttribute(\'data-id\'))" class="bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-200 py-2.5 rounded-xl text-xs font-extrabold flex items-center justify-center space-x-1 shadow-sm active:scale-95 transition-all"><span>🗺️ Haritada Gör</span></button>' +
+  '<button type="button" data-id="' + esc(selectedAid.id) + '" onclick="openMapModal(this.getAttribute(\'data-id\'))" class="bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl text-xs font-extrabold flex items-center justify-center space-x-1 shadow-sm active:scale-95 transition-all"><span>🧭 Canlı Navigasyon</span></button>' +
 '</div>' +
             '</div>' +
 
@@ -2674,6 +2676,79 @@ var selectedAid = state.selectedAidId ? state.aids.find(function(a) { return Str
               '<button type="submit" class="bg-emerald-800 hover:bg-emerald-900 text-white py-2.5 rounded-xl text-xs font-bold shadow-md active:scale-95 transition-all">PIN Güncelle</button>' +
             '</div>' +
           '</form>' +
+        '</div>';
+      }
+
+      // MODAL 8: NAVİGASYON VE HARİTA SEÇİCİ MODALI (Web\'e Yönlenmeden Doğrudan Uygulamayı Açar)
+      var mapAid = state.viewingMapAidId ? state.aids.find(function(a) { return String(a.id).trim() === String(state.viewingMapAidId).trim(); }) : null;
+      if (mapAid) {
+        var rawMapUrl = (mapAid.mapsUrl || '').trim();
+        var coordsMatch = rawMapUrl.match(/q=([-\d.]+),([-\d.]+)/) || 
+                          rawMapUrl.match(/@([-\d.]+),([-\d.]+)/) ||
+                          rawMapUrl.match(/([-\d.]+)\s*,\s*([-\d.]+)/);
+        var coordsStr = coordsMatch ? (coordsMatch[1] + ', ' + coordsMatch[2]) : '';
+
+        html += '<div class="fixed inset-0 z-[125] bg-slate-900/75 backdrop-blur-sm flex items-end justify-center p-0 animate-in fade-in duration-150">' +
+          '<div class="bg-white w-full max-w-md rounded-t-3xl p-5 space-y-3.5 shadow-2xl animate-in slide-in-from-bottom duration-200">' +
+            '<div class="flex justify-between items-start pb-2 border-b border-slate-100">' +
+              '<div>' +
+                '<h3 class="font-extrabold text-slate-900 text-base font-display flex items-center space-x-1.5">' +
+                  '<span>🧭</span><span>Yol Tarifi & Navigasyon</span>' +
+                '</h3>' +
+                '<p class="text-xs font-bold text-emerald-800 mt-0.5">' + esc(maskName(mapAid.name)) + ' • ' + esc(mapAid.neighborhood || '') + ' - ' + esc(mapAid.district || '') + '</p>' +
+                (coordsStr ? '<span class="text-[10px] text-slate-400 font-mono block mt-0.5">📍 ' + coordsStr + '</span>' : '') +
+              '</div>' +
+              '<button type="button" onclick="closeMapModal()" class="w-8 h-8 bg-slate-100 hover:bg-slate-200 rounded-full font-bold text-slate-500 text-xs flex items-center justify-center active:scale-90">✕</button>' +
+            '</div>' +
+
+            '<div class="space-y-2">' +
+              // 1. GOOGLE HARİTALAR (CANLI NAVİGASYON)
+              '<button type="button" onclick="launchNavigationApp(\'' + esc(mapAid.id) + '\', \'google\')" class="w-full bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 p-3.5 rounded-2xl flex items-center justify-between active:scale-95 transition-all text-left shadow-2xs">' +
+                '<div class="flex items-center space-x-3">' +
+                  '<div class="w-10 h-10 rounded-xl bg-emerald-700 text-white flex items-center justify-center text-xl shrink-0 shadow-sm">🟢</div>' +
+                  '<div>' +
+                    '<span class="font-extrabold text-slate-900 text-sm block">Google Haritalar</span>' +
+                    '<span class="text-[11px] text-emerald-800 font-semibold">Canlı sürüş rotası ve adım adım navigasyon</span>' +
+                  '</div>' +
+                '</div>' +
+                '<span class="text-xs font-bold text-emerald-800 bg-white px-2.5 py-1.5 rounded-xl border border-emerald-200 shadow-2xs">Başlat →</span>' +
+              '</button>' +
+
+              // 2. YANDEX NAVİGASYON (TÜRKİYE SAHASINDA EN ÇOK KULLANILAN)
+              '<button type="button" onclick="launchNavigationApp(\'' + esc(mapAid.id) + '\', \'yandex\')" class="w-full bg-amber-50/80 hover:bg-amber-100 border border-amber-300 p-3.5 rounded-2xl flex items-center justify-between active:scale-95 transition-all text-left shadow-2xs">' +
+                '<div class="flex items-center space-x-3">' +
+                  '<div class="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center text-xl shrink-0 shadow-sm">🟡</div>' +
+                  '<div>' +
+                    '<span class="font-extrabold text-slate-900 text-sm block">Yandex Navigasyon</span>' +
+                    '<span class="text-[11px] text-amber-900 font-semibold">Yandex Navi ile sesli yol tarifi al</span>' +
+                  '</div>' +
+                '</div>' +
+                '<span class="text-xs font-bold text-amber-900 bg-white px-2.5 py-1.5 rounded-xl border border-amber-200 shadow-2xs">Başlat →</span>' +
+              '</button>' +
+
+              // 3. CİHAZIN VARSAYILAN SİSTEM HARİTASI (GEO)
+              '<button type="button" onclick="launchNavigationApp(\'' + esc(mapAid.id) + '\', \'system\')" class="w-full bg-slate-50 hover:bg-slate-100 border border-slate-200 p-3 rounded-2xl flex items-center justify-between active:scale-95 transition-all text-left">' +
+                '<div class="flex items-center space-x-3">' +
+                  '<div class="w-9 h-9 rounded-xl bg-slate-700 text-white flex items-center justify-center text-lg shrink-0">🗺️</div>' +
+                  '<div>' +
+                    '<span class="font-bold text-slate-800 text-xs block">Sistem Haritası (Cihaz Seçimi)</span>' +
+                    '<span class="text-[10px] text-slate-500 font-medium">Telefonda yüklü harita seçicisini açar (Geo)</span>' +
+                  '</div>' +
+                '</div>' +
+                '<span class="text-[11px] font-bold text-slate-600 bg-white px-2.5 py-1 rounded-lg border border-slate-200">Aç →</span>' +
+              '</button>' +
+            '</div>' +
+
+            // 4. KOORDİNAT VE ADRES KOPYALA
+            '<div class="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100">' +
+              '<button type="button" onclick="copyAidLocation(\'' + esc(mapAid.id) + '\')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center space-x-1 active:scale-95 transition-all">' +
+                '<span>📋</span><span>Konumu Kopyala</span>' +
+              '</button>' +
+              '<button type="button" onclick="closeMapModal()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center active:scale-95 transition-all">' +
+                'Kapat' +
+              '</button>' +
+            '</div>' +
+          '</div>' +
         '</div>';
       }
 
@@ -3117,6 +3192,7 @@ var selectedAid = state.selectedAidId ? state.aids.find(function(a) { return Str
 
     window.closeChangePinModal = function() {
       state.changingPin = false;
+      state.viewingMapAidId = null;
       render();
     };
 
@@ -3164,6 +3240,7 @@ var selectedAid = state.selectedAidId ? state.aids.find(function(a) { return Str
       saveCacheItem('hare_cached_members', state.members);
 
       state.changingPin = false;
+      state.viewingMapAidId = null;
       pushToGoogleSheet('PIN Güncellendi', state.currentUser.name + ' kendi giriş PIN kodunu güncelledi.');
       render();
       showToast('✅ Giriş PIN kodunuz başarıyla güncellendi!');
@@ -3576,44 +3653,88 @@ var selectedAid = state.selectedAidId ? state.aids.find(function(a) { return Str
       }
     };
 
-    window.openMapForAid = function(id, mode) {
+        window.openMapModal = function(id) {
+      state.viewingMapAidId = String(id || '').trim();
+      pushNavState('mapModal:' + id);
+      render();
+    };
+
+    window.closeMapModal = function() {
+      state.viewingMapAidId = null;
+      render();
+    };
+
+    window.openMapForAid = window.openMapModal;
+
+    window.copyAidLocation = function(id) {
       var targetId = String(id || '').trim();
       var item = state.aids.find(function(a) { return String(a.id).trim() === targetId; });
-      if (!item) {
-        showToast('Hane kaydı bulunamadı.');
-        return;
-      }
+      if (!item) return;
 
       var rawUrl = (item.mapsUrl || '').trim();
       var coordsMatch = rawUrl.match(/q=([-\d.]+),([-\d.]+)/) || 
                         rawUrl.match(/@([-\d.]+),([-\d.]+)/) ||
                         rawUrl.match(/([-\d.]+)\s*,\s*([-\d.]+)/);
 
+      var coords = coordsMatch ? (coordsMatch[1] + ', ' + coordsMatch[2]) : '';
+      var addrParts = [item.address, item.neighborhood, item.district, item.city].filter(Boolean);
+      var fullText = (coords ? '📍 Koordinat: ' + coords + '\n' : '') + '🏠 Adres: ' + addrParts.join(', ');
+
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(fullText).then(function() {
+          showToast('📋 Konum ve adres panoya kopyalandı!');
+        }).catch(function() {
+          prompt('Konum ve adres:', fullText);
+        });
+      } else {
+        prompt('Konum ve adres:', fullText);
+      }
+    };
+
+    window.launchNavigationApp = function(id, appType) {
+      var targetId = String(id || '').trim();
+      var item = state.aids.find(function(a) { return String(a.id).trim() === targetId; });
+      if (!item) { showToast('Hane kaydı bulunamadı.'); return; }
+
+      var rawUrl = (item.mapsUrl || '').trim();
+      var coordsMatch = rawUrl.match(/q=([-\d.]+),([-\d.]+)/) || 
+                        rawUrl.match(/@([-\d.]+),([-\d.]+)/) ||
+                        rawUrl.match(/([-\d.]+)\s*,\s*([-\d.]+)/);
+
+      var lat = coordsMatch ? coordsMatch[1] : '';
+      var lon = coordsMatch ? coordsMatch[2] : '';
+      var label = encodeURIComponent(item.name || 'Hane Konumu');
+
       var isAndroid = /android/i.test(navigator.userAgent || '');
       var isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent || '');
-
       var targetUri = '';
-      var queryParam = '';
 
-      if (coordsMatch) {
-        var lat = coordsMatch[1];
-        var lon = coordsMatch[2];
-        var label = encodeURIComponent(item.name || 'Hane Konumu');
-        queryParam = lat + ',' + lon;
-
-        if (mode === 'nav') {
-          // 🧭 Canlı Navigasyon Başlat
+      if (appType === 'google') {
+        if (lat && lon) {
           if (isAndroid) {
-            // Android evrensel intent şeması: Google Maps veya cihazdaki herhangi bir navigasyon uygulamasını
-            // doğrudan sürüş/navigasyon modunda başlatır. Kesinlikle Play Store'a yönlendirmez.
             targetUri = 'google.navigation:q=' + lat + ',' + lon + '&mode=d';
           } else if (isIOS) {
-            targetUri = 'maps://?daddr=' + lat + ',' + lon + '&dirflg=d';
+            targetUri = 'comgooglemaps://?daddr=' + lat + ',' + lon + '&directionsmode=driving';
           } else {
             targetUri = 'https://www.google.com/maps/dir/?api=1&destination=' + lat + ',' + lon;
           }
         } else {
-          // 🗺️ Harita Üzerinde Pini ve Konumu Göster
+          var query = encodeURIComponent([item.neighborhood, item.district, item.city].filter(Boolean).join(', ') || item.address || item.name || 'Kayseri');
+          if (isAndroid) {
+            targetUri = 'google.navigation:q=' + query + '&mode=d';
+          } else {
+            targetUri = 'https://www.google.com/maps/dir/?api=1&destination=' + query;
+          }
+        }
+      } else if (appType === 'yandex') {
+        if (lat && lon) {
+          targetUri = 'yandexnavi://build_route_on_map?lat_to=' + lat + '&lon_to=' + lon;
+        } else {
+          var query = encodeURIComponent([item.neighborhood, item.district, item.city].filter(Boolean).join(', ') || item.address || item.name || 'Kayseri');
+          targetUri = 'yandexnavi://search?text=' + query;
+        }
+      } else if (appType === 'system') {
+        if (lat && lon) {
           if (isAndroid) {
             targetUri = 'geo:' + lat + ',' + lon + '?q=' + lat + ',' + lon + '(' + label + ')';
           } else if (isIOS) {
@@ -3621,82 +3742,37 @@ var selectedAid = state.selectedAidId ? state.aids.find(function(a) { return Str
           } else {
             targetUri = 'https://www.google.com/maps/search/?api=1&query=' + lat + ',' + lon;
           }
-        }
-      } else {
-        // Koordinat yoksa formdaki Mahalle, İlçe ve Şehir adresiyle arama yap
-        var parts = [item.address, item.neighborhood, item.district, item.city].filter(function(x) { return x && String(x).trim().length > 0; });
-        var query = parts.join(', ') || item.name || 'Kayseri';
-        var encodedQuery = encodeURIComponent(query);
-        queryParam = encodedQuery;
-
-        if (mode === 'nav') {
-          if (isAndroid) {
-            targetUri = 'google.navigation:q=' + encodedQuery + '&mode=d';
-          } else if (isIOS) {
-            targetUri = 'maps://?daddr=' + encodedQuery + '&dirflg=d';
-          } else {
-            targetUri = 'https://www.google.com/maps/dir/?api=1&destination=' + encodedQuery;
-          }
         } else {
-          if (isAndroid) {
-            targetUri = 'geo:0,0?q=' + encodedQuery;
-          } else if (isIOS) {
-            targetUri = 'maps://?q=' + encodedQuery;
-          } else {
-            targetUri = 'https://www.google.com/maps/search/?api=1&query=' + encodedQuery;
-          }
+          var query = encodeURIComponent([item.neighborhood, item.district, item.city].filter(Boolean).join(', ') || item.address || item.name || 'Kayseri');
+          targetUri = isAndroid ? ('geo:0,0?q=' + query) : ('https://www.google.com/maps/search/?api=1&query=' + query);
         }
       }
 
-      pushNavState('external');
+      state.viewingMapAidId = null;
+      render();
+      showToast('🧭 Harita uygulaması açılıyor...');
 
-      // 🛡️ ÇİFT KADEMELİ GÜVENLİ AÇILIŞ:
-      // 1. Önce doğrudan yerel navigasyon/harita protokolünü (google.navigation: / geo:) dener.
-      // 2. Android WebView veya TrebEdit gibi ortamlarda bu özel protokol yakalanamaz veya sessiz kalırsa,
-      //    kullanıcıyı asla mağdur etmez; 600ms sonra Google Maps Directions web/intent linkine kesintisiz yönlendirir.
-      var hasOpened = false;
-      var webFallback = (mode === 'nav')
-        ? ('https://www.google.com/maps/dir/?api=1&destination=' + queryParam)
-        : ('https://www.google.com/maps/search/?api=1&query=' + queryParam);
-
-      // Sayfa görünürlüğü değişirse yerel uygulama açılmış demektir
-      var onBlurHandler = function() {
-        hasOpened = true;
-        window.removeEventListener('blur', onBlurHandler);
-      };
-      window.addEventListener('blur', onBlurHandler);
-
-      if (mode === 'nav') {
-        // 🧭 CANLI NAVİGASYON:
-        // Standart https://www.google.com/maps/dir/?api=1&destination= linki,
-        // Android, iOS ve tüm tarayıcılarda Play Store hatası vermeden doğrudan Google Haritalar uygulamasını canlı rotada açar.
-        // Android Intent şeması eklenerek sistemin yerel Maps uygulamasına yönlendirmesi garanti edilir.
-        var navUrl = 'https://www.google.com/maps/dir/?api=1&destination=' + queryParam;
+      // 🛡️ WEB SAYFASINI ASLA DEĞİŞTİRMEYEN GÜVENLİ DISPATCH:
+      // Özel protokoller (google.navigation:, yandexnavi:, geo:) gizli iframe ile tetiklenir.
+      // Bu sayede WebView asla Google Haritalar web sitesine veya "Tarayıcınızı güncelleyin" sayfasına yönlenmez!
+      if (targetUri.indexOf('http://') !== 0 && targetUri.indexOf('https://') !== 0) {
         try {
+          var iframe = document.createElement('iframe');
+          iframe.style.display = 'none';
+          iframe.src = targetUri;
+          document.body.appendChild(iframe);
+          setTimeout(function() {
+            if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe);
+          }, 1500);
+        } catch(err) {
           var a = document.createElement('a');
-          a.href = navUrl;
-          a.target = '_blank';
-          a.rel = 'noopener noreferrer';
+          a.href = targetUri;
           document.body.appendChild(a);
           a.click();
-          setTimeout(function() { if (a && a.parentNode) a.parentNode.removeChild(a); }, 300);
-        } catch(err) {
-          window.location.href = navUrl;
+          setTimeout(function() { if (a && a.parentNode) a.parentNode.removeChild(a); }, 500);
         }
       } else {
-        // 🗺️ HARİTADA GÖR:
-        var mapUrl = 'https://www.google.com/maps/search/?api=1&query=' + queryParam;
-        try {
-          var a = document.createElement('a');
-          a.href = mapUrl;
-          a.target = '_blank';
-          a.rel = 'noopener noreferrer';
-          document.body.appendChild(a);
-          a.click();
-          setTimeout(function() { if (a && a.parentNode) a.parentNode.removeChild(a); }, 300);
-        } catch(err) {
-          window.location.href = mapUrl;
-        }
+        window.open(targetUri, '_blank', 'noopener,noreferrer');
       }
     };
 
@@ -3928,6 +4004,8 @@ var selectedAid = state.selectedAidId ? state.aids.find(function(a) { return Str
     // =========================================================================
     // 🔙 GEZİNTİ VE GERİ TUŞU YÖNETİMİ (Android Donanım Geri Tuşu Koruması)
     // =========================================================================
+        var lastBackPressTime = 0;
+
     function pushNavState(type) {
       try {
         history.pushState({ hareNav: type, timestamp: Date.now() }, '');
@@ -3936,7 +4014,10 @@ var selectedAid = state.selectedAidId ? state.aids.find(function(a) { return Str
 
     function ensureHistoryBuffer() {
       try {
-        history.pushState({ hareNav: 'guard', timestamp: Date.now() }, '');
+        // En az 4 tampon giriş ekle, böylece Android WebView canGoBack() her zaman açık kalsın
+        for (var i = 0; i < 4; i++) {
+          history.pushState({ hareNav: 'guard', ts: Date.now() + i }, '');
+        }
       } catch(e) {}
     }
 
@@ -3944,35 +4025,42 @@ var selectedAid = state.selectedAidId ? state.aids.find(function(a) { return Str
       // 🛡️ Android WebView'de canGoBack()'in daima true kalmasını sağla (Asla uygulamadan atmasın)
       ensureHistoryBuffer();
 
-      // 0. Onay modalı açıksa kapat
+      // 0. Harita & Navigasyon modalı açıksa kapat
+      if (state.viewingMapAidId) {
+        state.viewingMapAidId = null;
+        render();
+        return;
+      }
+
+      // 1. Onay modalı açıksa kapat
       var confirmModal = document.getElementById('custom-confirm-modal');
       if (confirmModal && confirmModal.style.display !== 'none') {
         closeCustomConfirm();
         return;
       }
 
-      // 1. PIN Değiştirme modalı açıksa kapat
+      // 2. PIN Değiştirme modalı açıksa kapat
       if (state.changingPin) {
         state.changingPin = false;
         render();
         return;
       }
 
-      // 2. Fotoğraf lightbox açıksa kapat
+      // 3. Fotoğraf lightbox açıksa kapat
       if (state.viewingPhotoUrl) {
         state.viewingPhotoUrl = null;
         render();
         return;
       }
 
-      // 3. Hane detay modalı açıksa kapat ve listeye dön
+      // 4. Hane detay modalı açıksa kapat ve listeye dön
       if (state.selectedAidId) {
         state.selectedAidId = null;
         render();
         return;
       }
 
-      // 4. Düzenleme modalları açıksa kapat
+      // 5. Düzenleme modalları açıksa kapat
       if (state.editingAidId || state.editingBudgetId || state.editingDonorId || state.editingMemberId) {
         state.editingAidId = null;
         state.editingBudgetId = null;
@@ -3982,7 +4070,7 @@ var selectedAid = state.selectedAidId ? state.aids.find(function(a) { return Str
         return;
       }
 
-      // 5. Hayırsever detay (Hayır Defteri) sayfası açıksa kapat
+      // 6. Hayırsever detay (Hayır Defteri) sayfası açıksa kapat
       if (state.viewingDonorDetails) {
         state.viewingDonorDetails = null;
         saveNavState();
@@ -3990,7 +4078,7 @@ var selectedAid = state.selectedAidId ? state.aids.find(function(a) { return Str
         return;
       }
 
-      // 6. Sorumlu kişisel kasa sayfası açıksa kapat
+      // 7. Sorumlu kişisel kasa sayfası açıksa kapat
       if (state.viewingMemberKasa) {
         state.viewingMemberKasa = null;
         saveNavState();
@@ -3998,7 +4086,7 @@ var selectedAid = state.selectedAidId ? state.aids.find(function(a) { return Str
         return;
       }
 
-      // 7. Kategori listeleme sayfası açıksa kapat
+      // 8. Kategori listeleme sayfası açıksa kapat
       if (state.viewingStatusList) {
         state.viewingStatusList = null;
         state.searchQuery = '';
@@ -4007,7 +4095,7 @@ var selectedAid = state.selectedAidId ? state.aids.find(function(a) { return Str
         return;
       }
 
-      // 8. Başka bir sekmede ise ('yeni', 'kasa', 'bagiscilar', 'ekip') -> Haneler ana sayfasına dön
+      // 9. Başka bir sekmede ise ('yeni', 'kasa', 'bagiscilar', 'ekip') -> Haneler ana sayfasına dön
       if (state.activeTab !== 'yardimlar') {
         state.activeTab = 'yardimlar';
         state.viewingStatusList = null;
@@ -4020,9 +4108,30 @@ var selectedAid = state.selectedAidId ? state.aids.find(function(a) { return Str
         return;
       }
 
-      // 9. Zaten Haneler ana sayfasında ve açık pencere yok -> ASLA UYGULAMADAN ATMA!
-      showToast('ℹ️ Çıkış yapmak için sağ üstteki 🚪 butonunu kullanabilirsiniz.');
+      // 10. Zaten Haneler ana sayfasında ve açık pencere yoksa: 2 Kere Basarak Güvenli Çıkış (Double-Tap Back to Exit)
+      var now = Date.now();
+      if (now - lastBackPressTime < 2000) {
+        showToast('🚪 Hâre kapatılıyor...');
+        try {
+          if (window.navigator && window.navigator.app && window.navigator.app.exitApp) {
+            window.navigator.app.exitApp();
+          } else {
+            history.go(-history.length);
+          }
+        } catch(e) {}
+        return;
+      } else {
+        lastBackPressTime = now;
+        showToast('🚪 Çıkmak için 2 saniye içinde tekrar basın');
+        ensureHistoryBuffer();
+        return;
+      }
     });
+
+    // Kullanıcının her ekrana dokunuşunda geçmiş tamponunu taze tut
+    document.addEventListener('click', function() {
+      ensureHistoryBuffer();
+    }, { passive: true });
 
     // İlk açılışta geçmiş tamponunu oluştur (Android canGoBack() her zaman açık kalsın)
     try {
