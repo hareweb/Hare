@@ -430,11 +430,6 @@
       showToast('🧹 Önbellek temizleniyor ve E-Tablo eşitleniyor...');
       try {
         localStorage.removeItem('hare_deleted_ids');
-        localStorage.removeItem('hare_cached_aids');
-        localStorage.removeItem('hare_cached_budget');
-        localStorage.removeItem('hare_cached_donors');
-        localStorage.removeItem('hare_cached_transfers');
-        localStorage.removeItem('hare_cached_logs');
         if ('caches' in window) {
           var names = await caches.keys();
           for (var i = 0; i < names.length; i++) {
@@ -443,7 +438,7 @@
         }
       } catch(e) {}
       await syncFromGoogleSheet(false);
-      showToast('✅ Önbellek temizlendi, güncel veriler eşitlendi!');
+      showToast('✅ E-Tablo ile eşitlendi!');
     };
 
     // =========================================================================
@@ -641,7 +636,15 @@
           // Eğer o sırada kullanıcı bir silme/ekleme gönderiyorsa sunucudaki eski verinin yerel silinenleri geri getirmesini engelle
           if (!state.isPushing) {
             if (Array.isArray(data.aids)) {
-              state.aids = data.aids.filter(function(a) { return !isIdDeleted(a.id); });
+              var serverAids = data.aids.filter(function(a) { return !isIdDeleted(a.id); });
+              // 🛡️ ÇİFT TARAFLI BİRLEŞTİRME: Yerelde yeni eklenen fakat henüz sunucuya yansımamış kayıtları koru
+              var serverIdMap = {};
+              serverAids.forEach(function(sa) { serverIdMap[String(sa.id).trim()] = true; });
+              var localOnly = (state.aids || []).filter(function(la) {
+                var lId = String(la.id).trim();
+                return !serverIdMap[lId] && !isIdDeleted(lId);
+              });
+              state.aids = localOnly.concat(serverAids);
               saveCacheItem('hare_cached_aids', state.aids);
             }
             if (Array.isArray(data.budget)) {
@@ -3663,29 +3666,38 @@ var selectedAid = state.selectedAidId ? state.aids.find(function(a) { return Str
       };
       window.addEventListener('blur', onBlurHandler);
 
-      try {
-        var a = document.createElement('a');
-        a.href = targetUri;
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(function() {
-          if (a && a.parentNode) a.parentNode.removeChild(a);
-        }, 300);
-      } catch(e) {
-        window.location.href = targetUri;
-      }
-
-      // Fallback kontrolü: 600ms içinde uygulama ön plana çıkmamışsa web yönlendirmesiyle aç
-      setTimeout(function() {
-        window.removeEventListener('blur', onBlurHandler);
-        if (!hasOpened && !document.hidden) {
-          try {
-            window.location.href = webFallback;
-          } catch(err) {
-            window.open(webFallback, '_system');
-          }
+      if (mode === 'nav') {
+        // 🧭 CANLI NAVİGASYON:
+        // Standart https://www.google.com/maps/dir/?api=1&destination= linki,
+        // Android, iOS ve tüm tarayıcılarda Play Store hatası vermeden doğrudan Google Haritalar uygulamasını canlı rotada açar.
+        // Android Intent şeması eklenerek sistemin yerel Maps uygulamasına yönlendirmesi garanti edilir.
+        var navUrl = 'https://www.google.com/maps/dir/?api=1&destination=' + queryParam;
+        try {
+          var a = document.createElement('a');
+          a.href = navUrl;
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(function() { if (a && a.parentNode) a.parentNode.removeChild(a); }, 300);
+        } catch(err) {
+          window.location.href = navUrl;
         }
-      }, 650);
+      } else {
+        // 🗺️ HARİTADA GÖR:
+        var mapUrl = 'https://www.google.com/maps/search/?api=1&query=' + queryParam;
+        try {
+          var a = document.createElement('a');
+          a.href = mapUrl;
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(function() { if (a && a.parentNode) a.parentNode.removeChild(a); }, 300);
+        } catch(err) {
+          window.location.href = mapUrl;
+        }
+      }
     };
 
     window.openPhotoModal = function(url) {

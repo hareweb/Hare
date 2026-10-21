@@ -245,3 +245,20 @@ Bu belgede, Hâre İnsani Yardım ve Ekip Koordinasyon Platformu'nda yapılan so
        * Hane Ekleme, Sandık, Hayırsever veya Gönüllü sekmesindeyse **doğrudan Haneler ana sayfasına dönülür**.
 
        * Zaten Haneler ana sayfasındaysa **uygulamadan kesinlikle atmaz**; ekranda *"ℹ️ Çıkış yapmak için sağ üstteki 🚪 butonunu kullanabilirsiniz"* uyarısı verir ve kullanıcıyı güvenle uygulamada tutar.
+### 20. 🛡️ Eklenen Kayıtların Kendi Kendine Silinmesini Önleme (Çift Taraflı Eşitleme Koruması)
+
+* **Karşılaşılan Sorun (188540.mp4 & 188541.jpg Analizi):**
+  * Kullanıcı yeni bir hane ("Mustafa Amca") ekledikten ve teslimat fotoğrafını yükledikten sonra, üstteki Canlı eşitlemeye basıldığında veya arka plandaki 30 saniyelik otomatik eşitleme çalıştığında hane listesi sıfırlanıyor ve ekranda *"Henüz kayıtlı hane bulunmuyor (0 Hane)"* yazıyordu.
+  * **Teknik Sebebi:** 
+    1. Eski sistemde sunucudan gelen liste (`data.aids`), cihazın yerel hafızasındaki (`state.aids`) kayıtların üzerine doğrudan yazılıyordu. Google Apps Script sunucusunda o an bir gecikme olduğunda veya kayıt sunucuya yazılırken arka plan eşitlemesi boş/eski liste döndürdüğünde, cihazda henüz kaydedilmiş yeni hane silinmiş gibi eziliyordu.
+    2. Ayrıca üst barda bulunan süpürge (`🧹`) butonu, cihazdaki yerel önbellek listesini (`hare_cached_aids`) de siliyordu.
+
+* **Uygulanan Kesin Çözümler:**
+  1. **Çift Taraflı Birleştirme Motoru (Two-Way Smart Merge):**
+     * Sunucudan veri çekildiğinde (`syncFromGoogleSheet`), yereldeki yeni kayıtlar ezilmez.
+     * Cihazda bulunan fakat sunucuya henüz yansımamış taze kayıtlar korunur ve sunucudan gelen listeyle akıllıca harmanlanır (`localOnly.concat(serverAids)`).
+     * Böylece internet kopsa, sunucu gecikse veya arka planda eşitleme çalışsa dahi eklediğiniz hiçbir kayıt kendi kendine silinmez.
+  2. **Temizle (🧹) Butonu İyileştirmesi:**
+     * Süpürge butonu artık kullanıcının cihazındaki gerçek kayıtları temizlemez; yalnızca tarayıcı ağ önbelleğini yeniler ve güvenli eşitleme yapar.
+  3. **Navigasyon ve Harita Kesin Tetikleyicisi:**
+     * "🧭 Canlı Navigasyon" ve "🗺️ Haritada Gör" butonları doğrudan evrensel Google Haritalar `https://www.google.com/maps/dir/?api=1&destination=...` motoruna bağlanarak WebView izin kısıtlamalarına takılmadan harita uygulamasını garantili olarak açar.
