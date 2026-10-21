@@ -411,3 +411,25 @@ Uygulamanın tamamı Node.js sanal tarayıcı (VM) ortamında uçtan uca simüle
 9. **PIN Değiştirme Sonrası Kalıcı Oturum Sızıntısı:**
    * **Sebep:** `handleSaveChangePin` fonksiyonu "Beni Hatırla" kapalı olsa bile `localStorage` içine `hare_user` yazıyordu.
    * **Çözüm:** Yalnızca `sessionStorage` güncellenir; kalıcı hafızaya sadece "Beni Hatırla" açıkken yazılır.
+
+
+### 25. 📱 Tüm Sistemde Alt Tuş Takımı Koruması, Geri Tuşu Hiyerarşisi ve Arka Plan Oturum Sürekliliği (188679.jpg Çözümü)
+
+* **Karşılaşılan 3 Sorun (`188679.jpg` Analizi):**
+  1. **Alt Tuş Takımının Açılır Pencerelerde (Modallarda) Butonlarla Çakışması:** Hane Düzenleme, Hane Detay, Kasa/Bağışçı/Gönüllü Düzenleme gibi pencereler (`z-50` – `z-[130]`) açıldığında, alt menünün (`z-40`) üstüne biniyor ve en alttaki yeşil **"Değişiklikleri Kaydet ve E-Tabloya Gönder"** butonu telefonun sanal geri/ana ekran tuşlarının (`■ ● ◀`) tam altına giriyordu.
+  2. **Geri Tuşunun Uygulamayı Kapatması:** Geri tuşuna basıldığında Android WebView geçmiş yığını (`canGoBack()`) URL hash değişimi olmadığı için boş görünüyor ya da ana ekranda çift basışta `exitApp()` / `history.go(-length)` çalışarak uygulamayı tamamen kapatıyordu.
+  3. **Uygulamayı Arka Plana Atınca Oturumdan Çıkması:** Uygulama arka plana atıldığında veya Kamera/Harita/WhatsApp gibi harici bir uygulamaya geçildiğinde bazı Android WebView (APK / `file://`) sürümlerinde `sessionStorage` sıfırlandığı için kullanıcıdan tekrar şifre isteniyordu.
+
+* **Uygulanan Kesin Çözümler:**
+  1. **🛡️ Tüm Sistemde Sabit Zümrüt Yeşili Alt Tuş Barı (`#global-system-bar` - `z-[999]`):**
+     * Sistem gezinti çubuğu (`#global-system-bar`) tüm pencerelerin ve modalların üstünde kalacak şekilde (`z-[999]`, asgari `52px` / `3.25rem` yükseklikte) doğrudan `<body>` seviyesine sabitlendi.
+     * Tüm açılır pencerelere (Hane Detay, Hane Düzenle, Kasa Düzenle, Hayırsever Düzenle, Gönüllü Yetki Düzenle, Fotoğraf İnceleme, PIN Değiştirme ve Onay pencereleri) `.modal-sheet-safe` (`calc(var(--sys-nav-h) + 1.5rem)`) alt güvenlik boşluğu eklendi.
+     * Böylece hangi pencere veya bölüm açılırsa açılsın, kaydetme butonları daima zümrüt yeşili alt tuş barının üzerinde kalır; telefonun `■ ● ◀` tuşlarıyla asla üst üste binmez.
+  2. **🔙 Geri Tuşunun Uygulamayı Asla Kapatmaması — Yalnızca İlgili Bölümü Kapatması:**
+     * Uygulamayı kapatan `exitApp()` ve `history.go(-history.length)` kodları tamamen kaldırıldı.
+     * Android WebView'in `canGoBack()` kontrolünü işletim sistemi seviyesinde daima canlı tutan gerçek URL hash tabanlı geçmiş tamponu (`#hare-1`, `#hare-2` ...) ve `backbutton` + `popstate` köprüsü kuruldu.
+     * Geri tuşuna basıldığında yalnızca açık olan pencere veya bölüm kapanır (Onay Penceresi → PIN → Fotoğraf → Hane Düzenle → Hane Detay → Hayır Defteri / Sorumlu Kasası → Alt Sekmeler → Kategori Listesi → Haneler Ana Ekranı). Ana ekrandayken geri tuşuna basılsa dahi uygulama **kesinlikle kapanmaz**.
+  3. **🔒 Arka Planda Oturumu Koruma & Yalnızca Tamamen Kapatınca Şifre İsteme:**
+     * Çok katmanlı oturum motoru (`sessionStorage` + `window.name` + `hare_session_active=1` süreç çerezi + arka plan kalp atışı ve harici uygulama köprüsü) devreye alındı.
+     * Uygulama arka plana atıldığında (orta tuşa basıldığında), ekran kilitlendiğinde veya WhatsApp/Harita/Kamera açıldığında kullanıcı çıkışı **kesinlikle olmaz** ve kaldığınız bölüm korunur.
+     * Yalnızca uygulama son kullanılanlardan kaydırılarak **tamamen kapatıldığında** (veya sağ üstten `🚪` Çıkış butonuna basıldığında) yeniden açılışta güvenlik için PIN kodu sorulur.

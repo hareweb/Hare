@@ -82,14 +82,30 @@
     h1, h2, h3, .font-display { font-family: 'Outfit', sans-serif; }
     .hide-scrollbar::-webkit-scrollbar { display: none; }
     .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-    .safe-system-bar { height: max(1.5rem, calc(env(safe-area-inset-bottom, 0px) + 0.6rem)); min-height: 22px; }
+    :root {
+      --sys-nav-h: max(3.25rem, calc(env(safe-area-inset-bottom, 0px) + 2.75rem));
+    }
+    .safe-system-bar {
+      height: var(--sys-nav-h);
+      min-height: 52px;
+    }
+    .bottom-nav-offset {
+      bottom: var(--sys-nav-h);
+    }
+    .modal-sheet-safe {
+      padding-bottom: calc(var(--sys-nav-h) + 1.5rem) !important;
+      max-height: calc(100vh - 3rem) !important;
+    }
+    .login-safe-bottom {
+      padding-bottom: calc(var(--sys-nav-h) + 2.5rem) !important;
+    }
   </style>
 </head>
 <body class="bg-slate-100 text-slate-800 antialiased flex justify-center min-h-screen">
 
   <div id="debug-error" style="display:none;" class="fixed top-2 left-2 right-2 bg-rose-50 border border-rose-300 text-rose-800 p-3 rounded-xl text-xs z-50 text-center shadow-lg"></div>
   
-  <div id="custom-confirm-modal" style="display:none;" class="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150">
+  <div id="custom-confirm-modal" style="display:none;" class="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 pb-20 animate-in fade-in duration-150">
     <div class="bg-white rounded-3xl p-6 max-w-xs w-full shadow-2xl text-center space-y-4">
       <div class="w-12 h-12 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center mx-auto text-xl">⚠️</div>
       <p id="custom-confirm-msg" class="text-sm font-bold text-slate-800">Emin misiniz?</p>
@@ -102,7 +118,8 @@
 
 
 
-  <div id="root" class="w-full max-w-md min-h-screen bg-slate-50 flex flex-col shadow-2xl relative pb-36 overflow-x-hidden"></div>
+  <div id="root" class="w-full max-w-md min-h-screen bg-slate-50 flex flex-col shadow-2xl relative pb-48 overflow-x-hidden"></div>
+  <div id="global-system-bar" class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-[#065f46] border-t border-emerald-800/60 z-[999] pointer-events-none safe-system-bar" title="Sistem Gezinti Çubuğu"></div>
 
   <script>
     // XSS GÜVENLİ HATA İŞLEYİCİSİ (textContent Kullanımı)
@@ -125,6 +142,7 @@
         msgEl.textContent = msg;
         confirmCallback = onConfirm;
         modal.style.display = 'flex';
+        if (typeof pushNavState === 'function') pushNavState('confirm');
       } else {
         if (onConfirm) onConfirm();
       }
@@ -440,8 +458,28 @@
     };
 
     // =========================================================================
-    // 🧭 SAYFA GEZİNTİSİ VE YENİLEME (REFRESH) KORUMASI MOTORU
+    // 🧭 SAYFA GEZİNTİSİ VE ARKA PLAN OTURUM KORUMASI MOTORU
     // =========================================================================
+    function saveActiveSession(user) {
+      if (!user) return;
+      var serialized = JSON.stringify(user);
+      try { sessionStorage.setItem('hare_session_user', serialized); } catch(e) {}
+      try { window.name = 'HARE_SESSION:' + serialized; } catch(e) {}
+      try { document.cookie = 'hare_session_active=1; path=/; SameSite=Lax'; } catch(e) {}
+      try {
+        localStorage.setItem('hare_bg_user', serialized);
+        localStorage.setItem('hare_heartbeat_ts', String(Date.now()));
+        localStorage.removeItem('hare_app_closed');
+      } catch(e) {}
+    }
+
+    window.markExternalIntentActive = function() {
+      try {
+        localStorage.setItem('hare_external_intent_ts', String(Date.now()));
+        if (state.currentUser) saveActiveSession(state.currentUser);
+      } catch(e) {}
+    };
+
     function saveNavState() {
       try {
         var nav = {
@@ -453,21 +491,29 @@
           viewingStatusList: state.viewingStatusList || null,
           selectedFilter: state.selectedFilter || 'Tümü'
         };
-        sessionStorage.setItem('hare_nav_state', JSON.stringify(nav));
+        var raw = JSON.stringify(nav);
+        sessionStorage.setItem('hare_nav_state', raw);
+        localStorage.setItem('hare_bg_nav_state', raw);
       } catch(e) {}
     }
 
-    function restoreNavState() {
+    function restoreNavState(keepSection) {
       try {
-        var raw = sessionStorage.getItem('hare_nav_state');
+        var raw = sessionStorage.getItem('hare_nav_state') || (keepSection ? localStorage.getItem('hare_bg_nav_state') : null);
         if (raw) {
           var nav = JSON.parse(raw);
           if (nav.kasaSubTab) state.kasaSubTab = nav.kasaSubTab;
           if (nav.adminSubTab) state.adminSubTab = nav.adminSubTab;
           if (nav.selectedFilter) state.selectedFilter = nav.selectedFilter;
+          if (keepSection) {
+            if (nav.activeTab) state.activeTab = nav.activeTab;
+            state.viewingStatusList = nav.viewingStatusList || null;
+            state.viewingMemberKasa = nav.viewingMemberKasa || null;
+            state.viewingDonorDetails = nav.viewingDonorDetails || null;
+            return;
+          }
         }
       } catch(e) {}
-      // 📱 GİRİŞTE VE HER AÇILIŞTA DAİMA HANELER (YARDIMLAR) BÖLÜMÜNDE AÇILSIN
       state.activeTab = 'yardimlar';
       state.viewingStatusList = null;
       state.viewingMemberKasa = null;
@@ -509,10 +555,9 @@
         state.selectedAidId = null;
         state.editingAidId = null;
 
-        // Oturum hafızası: Sayfa yenilendiğinde (F5) oturumu korur
+        // Oturum hafızası: Uygulama arka plana atıldığında veya sayfa yenilendiğinde (F5) oturumu korur
+        saveActiveSession(user);
         try {
-          sessionStorage.setItem('hare_session_user', JSON.stringify(user));
-          // Son seçilen kişiyi hatırla (Tekrar açıldığında dropdown'da hazır seçili gelir)
           localStorage.setItem('hare_last_member_id', String(user.id));
         } catch(e) {}
 
@@ -699,7 +744,7 @@
               state.donors = mergeSafeList(state.donors, data.donors, false);
               saveCacheItem('hare_cached_donors', state.donors);
             }
-            if (Array.isArray(data.members)) {
+            if (Array.isArray(data.members) && data.members.length > 0) {
               state.members = data.members.filter(function(m) { return !isIdDeleted(m.id); }).map(function(m) {
                 return {
                   id: String(m.id || '').trim(),
@@ -1007,6 +1052,7 @@
         return;
       }
       var telUrl = 'tel:' + num;
+      markExternalIntentActive();
       pushNavState('external');
       try {
         var a = document.createElement('a');
@@ -1032,6 +1078,7 @@
       var appUrl = 'whatsapp://send?phone=' + waNum + msgParam;
       var webUrl = 'https://api.whatsapp.com/send?phone=' + waNum + msgParam;
 
+      markExternalIntentActive();
       pushNavState('external');
       try {
         var a = document.createElement('a');
@@ -1064,6 +1111,7 @@
 
       var appUrl = 'whatsapp://send?text=' + encodeURIComponent(text);
       var webUrl = 'https://api.whatsapp.com/send?text=' + encodeURIComponent(text);
+      markExternalIntentActive();
       pushNavState('external');
       try {
         var a = document.createElement('a');
@@ -1435,7 +1483,7 @@
         return '<option value="' + esc(m.id) + '" ' + (isSel ? 'selected' : '') + '>' + esc(m.name) + '</option>';
       }).join('');
 
-      return '<div class="flex-1 flex flex-col justify-center px-6 py-10 bg-white">' +
+      return '<div class="flex-1 flex flex-col justify-center px-6 py-10 bg-white login-safe-bottom">' +
         '<div class="text-center mb-8">' +
           '<div class="flex justify-center mb-3">' + renderLogo(76) + '</div>' +
           '<h1 class="text-3xl font-extrabold text-slate-900 tracking-tight font-display">Hâre</h1>' +
@@ -1722,7 +1770,7 @@
             '<input id="newMapsUrl" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm mt-1 outline-none focus:ring-2 focus:ring-emerald-600" placeholder="https://maps.google.com/..." />' +
             '<p class="text-[10px] text-slate-400 mt-1 leading-snug">💡 APK uygulamasında telefon izin penceresi açılmıyorsa <strong>"🗺️ Adresten Üret"</strong> ile adresten anında navigasyon linki oluşturabilirsiniz.</p>' +
           '</div>' +
-          '<div><label class="text-xs font-bold text-slate-500 uppercase block mb-1">Fotoğraflar (En fazla 3 adet)</label><input type="file" id="photoInput" accept="image/*" multiple onchange="handlePhotoSelect(event)" class="text-xs text-slate-500 file:mr-2 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-emerald-50 file:text-emerald-800 hover:file:bg-emerald-100 cursor-pointer" /><div id="photoPreviewContainer" class="flex gap-2 mt-2"></div></div>' +
+          '<div><label class="text-xs font-bold text-slate-500 uppercase block mb-1">Fotoğraflar (En fazla 3 adet)</label><input type="file" id="photoInput" accept="image/*" multiple onclick="markExternalIntentActive()" onchange="handlePhotoSelect(event)" class="text-xs text-slate-500 file:mr-2 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-emerald-50 file:text-emerald-800 hover:file:bg-emerald-100 cursor-pointer" /><div id="photoPreviewContainer" class="flex gap-2 mt-2"></div></div>' +
           '<div><label class="text-xs font-bold text-slate-500 uppercase block mb-1">Emanet Türü (İhtiyaç Kalemleri)</label><div class="grid grid-cols-2 gap-2 text-xs font-bold">' + catOptions + '</div></div>' +
           '<div><label class="text-xs font-bold text-slate-500 uppercase">Aciliyet Durumu</label><select id="newStatus" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm mt-1 font-bold outline-none focus:ring-2 focus:ring-emerald-600"><option value="Acil İhtiyaç">🚨 Müstacel (Acil İhtiyaç)</option><option value="Planlandı">⏳ Planlandı (Hazırlık Aşamasında)</option><option value="Teslim Edildi">✅ Emanet (Yardım) Ulaştırıldı</option><option value="Periyodik Takip">🔄 Periyodik (Düzenli) Takip</option></select></div>' +
           '<div><label class="text-xs font-bold text-slate-500 uppercase">Tespit Notları ve Detaylar</label><textarea id="newNotes" rows="2" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm mt-1 outline-none focus:ring-2 focus:ring-emerald-600" placeholder="Aile durumu, acil ihtiyaçlar..."></textarea></div>' +
@@ -2511,8 +2559,8 @@
           ? '<div class="flex flex-wrap gap-1.5">' + catsArr.map(function(c) { return '<span class="bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-bold px-2.5 py-1 rounded-xl">📦 ' + esc(c) + '</span>'; }).join('') + '</div>'
           : '<span class="text-xs text-slate-400 italic">İhtiyaç kalemi seçilmemiş.</span>';
 
-        html += '<div class="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-end justify-center">' +
-          '<div class="bg-white w-full max-w-md max-h-[88vh] rounded-t-3xl p-5 overflow-y-auto modal-scroll-body space-y-3.5 shadow-2xl">' +
+        html += '<div onclick="if(event.target===this)closeAidModal()" class="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-end justify-center">' +
+          '<div class="bg-white w-full max-w-md rounded-t-3xl p-5 overflow-y-auto modal-scroll-body modal-sheet-safe space-y-3.5 shadow-2xl">' +
             // ÜST BAŞLIK & DURUM ROZETİ
             '<div class="flex justify-between items-start pb-2 border-b border-slate-100">' +
               '<div>' +
@@ -2560,7 +2608,7 @@
                   '</div></div>'
                 : '';
 
-              var uploadBtn = '<div class="pt-0.5"><label class="w-full bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 py-2.5 rounded-xl text-xs font-extrabold flex items-center justify-center space-x-2 cursor-pointer active:scale-95 transition-all shadow-xs"><span class="text-base">📸</span><span>Teslimat / Ulaştırma Fotoğrafı Ekle</span><input type="file" accept="image/*" multiple onchange="handleDeliveryPhotoSelect(event, \'' + esc(selectedAid.id) + '\')" class="hidden" /></label></div>';
+              var uploadBtn = '<div class="pt-0.5"><label class="w-full bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 py-2.5 rounded-xl text-xs font-extrabold flex items-center justify-center space-x-2 cursor-pointer active:scale-95 transition-all shadow-xs"><span class="text-base">📸</span><span>Teslimat / Ulaştırma Fotoğrafı Ekle</span><input type="file" accept="image/*" multiple onclick="markExternalIntentActive()" onchange="handleDeliveryPhotoSelect(event, \'' + esc(selectedAid.id) + '\')" class="hidden" /></label></div>';
 
               return delGallery + uploadBtn;
             })() +
@@ -2606,8 +2654,8 @@
 
             // MODAL 2: HANE DÜZENLEME PENCERESİ (İl / İlçe / Mahalle 3'lü Düzenleme)
       if (isAdmin && editingAid) {
-        html += '<div class="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-end justify-center">' +
-          '<form onsubmit="handleSaveEditAid(event)" class="bg-white w-full max-w-md max-h-[85vh] rounded-t-3xl p-5 overflow-y-auto modal-scroll-body space-y-3.5 shadow-2xl">' +
+        html += '<div onclick="if(event.target===this)closeEditAid()" class="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-end justify-center">' +
+          '<form onsubmit="handleSaveEditAid(event)" class="bg-white w-full max-w-md rounded-t-3xl p-5 overflow-y-auto modal-scroll-body modal-sheet-safe space-y-3.5 shadow-2xl">' +
             '<div class="flex justify-between items-center pb-2 border-b"><h3 class="font-extrabold text-slate-900 text-base font-display">Hane Bilgilerini Düzenle</h3><button type="button" onclick="closeEditAid()" class="w-7 h-7 bg-slate-100 rounded-full font-bold text-slate-500 text-xs">✕</button></div>' +
             '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Hane Adı / Rumuz</label><input id="editAidName" required value="' + esc(editingAid.name) + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:bg-white" /></div>' +
             '<div class="grid grid-cols-3 gap-2">' +
@@ -2632,8 +2680,8 @@
 
       // MODAL 3: KASA HAREKETİ DÜZENLEME PENCERESİ
       if (isAdmin && editingBudget) {
-        html += '<div class="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-end justify-center">' +
-          '<form onsubmit="handleSaveEditBudget(event)" class="bg-white w-full max-w-md rounded-t-3xl p-5 space-y-3.5 shadow-2xl">' +
+        html += '<div onclick="if(event.target===this)closeEditBudget()" class="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-end justify-center">' +
+          '<form onsubmit="handleSaveEditBudget(event)" class="bg-white w-full max-w-md rounded-t-3xl p-5 overflow-y-auto modal-scroll-body modal-sheet-safe space-y-3.5 shadow-2xl">' +
             '<div class="flex justify-between items-center pb-2 border-b"><h3 class="font-extrabold text-slate-900 text-base font-display">Kasa Hareketini Düzenle</h3><button type="button" onclick="closeEditBudget()" class="w-7 h-7 bg-slate-100 rounded-full font-bold text-slate-500 text-xs">✕</button></div>' +
             '<div class="grid grid-cols-2 gap-2">' +
               '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Hareket Türü</label><select id="editBudgetType" onchange="updateEditBudgetLabels(this.value)" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold"><option value="gelir" ' + (editingBudget.type === 'gelir' ? 'selected' : '') + '>🟢 Teberru (Bağış)</option><option value="gider" ' + (editingBudget.type === 'gider' ? 'selected' : '') + '>🔴 İnfak (Harcama)</option></select></div>' +
@@ -2652,8 +2700,8 @@
 
       // MODAL 4: HAYIRSEVER DÜZENLEME PENCERESİ
       if (isAdmin && editingDonor) {
-        html += '<div class="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-end justify-center">' +
-          '<form onsubmit="handleSaveEditDonor(event)" class="bg-white w-full max-w-md rounded-t-3xl p-5 space-y-3.5 shadow-2xl">' +
+        html += '<div onclick="if(event.target===this)closeEditDonor()" class="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-end justify-center">' +
+          '<form onsubmit="handleSaveEditDonor(event)" class="bg-white w-full max-w-md rounded-t-3xl p-5 overflow-y-auto modal-scroll-body modal-sheet-safe space-y-3.5 shadow-2xl">' +
             '<div class="flex justify-between items-center pb-2 border-b"><h3 class="font-extrabold text-slate-900 text-base font-display">Hayırsever Bilgisini Düzenle</h3><button type="button" onclick="closeEditDonor()" class="w-7 h-7 bg-slate-100 rounded-full font-bold text-slate-500 text-xs">✕</button></div>' +
             '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Ad Soyad</label><input id="editDonorName" required value="' + esc(editingDonor.name) + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:bg-white" /></div>' +
             '<div class="grid grid-cols-2 gap-2"><div><label class="text-[11px] font-bold text-slate-500 uppercase">Telefon</label><input id="editDonorPhone" type="tel" value="' + esc(editingDonor.phone || '') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div><div><label class="text-[11px] font-bold text-slate-500 uppercase">Şehir</label><input id="editDonorCity" value="' + esc(editingDonor.city || '') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div></div>' +
@@ -2666,8 +2714,8 @@
 
       // MODAL 5: GÖNÜLLÜ DÜZENLEME & YÖNETİCİ YAPMA
       if (isAdmin && editingMember) {
-        html += '<div class="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-end justify-center">' +
-          '<form onsubmit="handleSaveEditMember(event)" class="bg-white w-full max-w-md rounded-t-3xl p-5 space-y-3.5 shadow-2xl">' +
+        html += '<div onclick="if(event.target===this)closeEditMember()" class="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-end justify-center">' +
+          '<form onsubmit="handleSaveEditMember(event)" class="bg-white w-full max-w-md rounded-t-3xl p-5 overflow-y-auto modal-scroll-body modal-sheet-safe space-y-3.5 shadow-2xl">' +
             '<div class="flex justify-between items-center pb-2 border-b"><h3 class="font-extrabold text-slate-900 text-base font-display">Gönüllü Yetki & Bilgi Düzenle</h3><button type="button" onclick="closeEditMember()" class="w-7 h-7 bg-slate-100 hover:bg-slate-200 rounded-full font-bold text-slate-500 text-xs flex items-center justify-center">✕</button></div>' +
             '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Adı Soyadı</label><input id="editMemberName" required value="' + esc(editingMember.name) + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:bg-white" /></div>' +
             '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Telefon Numarası</label><input id="editMemberPhone" type="tel" value="' + esc(editingMember.phone || '') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
@@ -2692,7 +2740,7 @@
           '<div class="flex-1 flex items-center justify-center w-full max-w-md p-2 overflow-hidden">' +
             '<img src="' + safePhoto(state.viewingPhotoUrl) + '" class="max-h-[68vh] max-w-full rounded-2xl object-contain shadow-2xl border border-white/20" alt="Saha Fotoğrafı" />' +
           '</div>' +
-          '<div class="w-full max-w-md space-y-2 pb-3">' +
+          '<div class="w-full max-w-md space-y-2 modal-sheet-safe">' +
             '<a href="' + safePhoto(state.viewingPhotoUrl) + '" download="hare_saha_fotografi_' + Date.now() + '.jpg" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs py-3.5 rounded-2xl flex items-center justify-center space-x-2 shadow-xl active:scale-95 transition-transform text-center">' +
               '<span class="text-base">⬇️</span><span>Fotoğrafı Telefona / Cihaza İndir</span>' +
             '</a>' +
@@ -2705,7 +2753,7 @@
 
             // MODAL 7: KENDİ PIN KODUNU DEĞİŞTİRME MODALI
       if (state.changingPin) {
-        html += '<div class="fixed inset-0 z-[130] bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">' +
+        html += '<div onclick="if(event.target===this)closeChangePinModal()" class="fixed inset-0 z-[130] bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 pb-20 animate-in fade-in duration-150">' +
           '<form onsubmit="handleSaveChangePin(event)" class="bg-white rounded-3xl p-6 max-w-xs w-full shadow-2xl space-y-4">' +
             '<div class="flex justify-between items-center pb-2 border-b border-slate-100">' +
               '<div class="flex items-center space-x-2">' +
@@ -2767,11 +2815,10 @@
         '</button>';
       }).join('');
 
-      html += '<nav class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md z-40 flex flex-col pointer-events-auto">' +
-        '<div class="w-full bg-white/98 backdrop-blur-xl border-t border-slate-200/90 rounded-t-3xl shadow-[0_-8px_30px_rgba(0,0,0,0.12)] flex justify-around items-center pt-2 pb-1.5 px-1">' +
+      html += '<nav class="fixed left-1/2 -translate-x-1/2 w-full max-w-md z-40 flex flex-col pointer-events-auto bottom-nav-offset">' +
+        '<div class="w-full bg-white/98 backdrop-blur-xl border-t border-slate-200/90 rounded-t-3xl shadow-[0_-8px_30px_rgba(0,0,0,0.12)] flex justify-around items-center pt-2 pb-2 px-1">' +
           navButtonsHTML +
         '</div>' +
-        '<div class="w-full bg-[#065f46] border-t border-emerald-800/40 safe-system-bar" title="Sistem Gezinti Çubuğu"></div>' +
       '</nav>';
 
       root.innerHTML = html;
@@ -2819,6 +2866,7 @@
     };
 
     window.setKasaSubTab = function(sub) {
+      if (state.kasaSubTab !== sub) pushNavState('kasaSub:' + sub);
       state.kasaSubTab = sub;
       state.viewingMemberKasa = null;
       saveNavState();
@@ -2943,6 +2991,7 @@
     };
 
     window.setAdminSubTab = function(sub) {
+      if (state.adminSubTab !== sub) pushNavState('adminSub:' + sub);
       state.adminSubTab = sub;
       saveNavState();
       render();
@@ -3002,6 +3051,7 @@
     // HANE, KASA, BAĞIŞÇI DÜZENLEME & SİLME
     window.openEditAid = function(id) {
       if (!checkIsAdmin(state.currentUser)) { showToast('Yalnızca yöneticiler düzenleyebilir.'); return; }
+      state.previousSelectedAidId = state.selectedAidId || String(id || '').trim();
       state.selectedAidId = null;
       state.editingAidId = String(id || '').trim();
       pushNavState('editAid');
@@ -3010,6 +3060,10 @@
 
     window.closeEditAid = function() {
       state.editingAidId = null;
+      if (state.previousSelectedAidId) {
+        state.selectedAidId = state.previousSelectedAidId;
+        state.previousSelectedAidId = null;
+      }
       render();
     };
 
@@ -3223,7 +3277,7 @@
       state.currentUser.pin = newPin;
 
       try {
-        sessionStorage.setItem('hare_session_user', JSON.stringify(state.currentUser));
+        saveActiveSession(state.currentUser);
         if (localStorage.getItem('hare_remember_me') === '1') {
           saveCacheItem('hare_user', state.currentUser);
         }
@@ -3709,6 +3763,8 @@
         }
       }
 
+      markExternalIntentActive();
+      pushNavState('external');
       showToast('🗺️ Cihaz haritası açılıyor...');
 
       // 🛡️ WEB SAYFASINI ASLA DEĞİŞTİRMEYEN GÜVENLİ DISPATCH:
@@ -3941,10 +3997,11 @@
       serverLogin(mId, pin, rememberMe);
     };
 
-    // ÇIKIŞ: KVKK GEREĞİ TELEFONDAKİ TÜM VERİLERİ SIFIRLAR
+    // ÇIKIŞ: YALNIZCA OTURUM BİLGİLERİNİ TEMİZLER (VERİLERİ SİLMEZ)
     window.logout = function() {
       state.currentUser = null;
       state.selectedAidId = null;
+      state.previousSelectedAidId = null;
       state.editingAidId = null;
       state.editingBudgetId = null;
       state.editingDonorId = null;
@@ -3954,9 +4011,16 @@
       try {
         localStorage.removeItem('hare_user');
         localStorage.removeItem('hare_remember_me');
+        localStorage.removeItem('hare_bg_user');
+        localStorage.removeItem('hare_bg_state');
+        localStorage.removeItem('hare_heartbeat_ts');
+        localStorage.removeItem('hare_external_intent_ts');
+        localStorage.setItem('hare_app_closed', '1');
         sessionStorage.removeItem('hare_session_user');
         sessionStorage.removeItem('hare_nav_state');
       } catch(e) {}
+      try { window.name = ''; } catch(e) {}
+      try { document.cookie = 'hare_session_active=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;'; } catch(e) {}
       render();
     };
 
@@ -3968,62 +4032,78 @@
     };
 
     // =========================================================================
-    // 🔙 GEZİNTİ VE GERİ TUŞU YÖNETİMİ (Android Donanım Geri Tuşu Koruması)
+    // 🔙 GEZİNTİ VE GERİ TUŞU YÖNETİMİ (Uygulamayı Asla Kapatmaz, Yalnızca İlgili Bölümü Kapatır)
     // =========================================================================
-    // =========================================================================
-    // 🔙 GEZİNTİ VE GERİ TUŞU YÖNETİMİ (Android Donanım Geri Tuşu Koruması)
-    // =========================================================================
-    var lastBackPressTime = 0;
+    var navStepCounter = 1;
+    var lastBackHandledAt = 0;
 
     function pushNavState(type) {
       try {
-        history.pushState({ hareNav: type, timestamp: Date.now() }, '');
+        navStepCounter++;
+        history.pushState({ hareNav: type || 'nav', step: navStepCounter, timestamp: Date.now() }, '', '#hare-' + navStepCounter);
       } catch(e) {}
     }
 
     function ensureHistoryBuffer() {
       try {
-        for (var i = 0; i < 4; i++) {
-          history.pushState({ hareNav: 'guard', ts: Date.now() + i }, '');
-        }
+        navStepCounter++;
+        history.pushState({ hareNav: 'guard', step: navStepCounter, ts: Date.now() }, '', '#hare-' + navStepCounter);
       } catch(e) {}
     }
 
-    window.addEventListener('popstate', function(event) {
-      // 🛡️ Android WebView'de canGoBack()'in daima true kalmasını sağla (Asla uygulamadan atmasın)
-      ensureHistoryBuffer();
+    function initHistoryGuard() {
+      try {
+        history.replaceState({ hareNav: 'root', step: 0 }, '', '#hare-0');
+        for (var i = 1; i <= 5; i++) {
+          history.pushState({ hareNav: 'guard', step: i, ts: Date.now() + i }, '', '#hare-' + i);
+        }
+        navStepCounter = 6;
+      } catch(e) {}
+    }
 
-      // 0. Onay modalı açıksa kapat
+    window.handleBackNavigation = function() {
+      var now = Date.now();
+      if (now - lastBackHandledAt < 120) return;
+      lastBackHandledAt = now;
+
+      // 🛡️ Android WebView'de canGoBack()'in daima true kalmasını sağla (Uygulama asla kapanmasın)
+      ensureHistoryBuffer();
+      setTimeout(ensureHistoryBuffer, 10);
+
+      // Giriş ekranındaysa geri tuşu uygulamayı kapatmasın
+      if (!state.currentUser) {
+        return;
+      }
+
+      // 0. Onay modalı açıksa sadece onay modalını kapat
       var confirmModal = document.getElementById('custom-confirm-modal');
       if (confirmModal && confirmModal.style.display !== 'none') {
         closeCustomConfirm();
         return;
       }
 
-      // 1. PIN Değiştirme modalı açıksa kapat
+      // 1. PIN Değiştirme modalı açıksa sadece onu kapat
       if (state.changingPin) {
         state.changingPin = false;
         render();
         return;
       }
 
-      // 2. Fotoğraf lightbox açıksa kapat
+      // 2. Fotoğraf lightbox açıksa sadece onu kapat
       if (state.viewingPhotoUrl) {
         state.viewingPhotoUrl = null;
         render();
         return;
       }
 
-      // 3. Hane detay modalı açıksa kapat ve listeye dön
-      if (state.selectedAidId) {
-        state.selectedAidId = null;
-        render();
+      // 3. Hane düzenleme modalı açıksa sadece düzenleme modalını kapat (Detaydan açıldıysa detaya döner)
+      if (state.editingAidId) {
+        closeEditAid();
         return;
       }
 
-      // 4. Düzenleme modalları açıksa kapat
-      if (state.editingAidId || state.editingBudgetId || state.editingDonorId || state.editingMemberId) {
-        state.editingAidId = null;
+      // 4. Diğer düzenleme modalları (Kasa, Hayırsever, Gönüllü) açıksa sadece o modalı kapat
+      if (state.editingBudgetId || state.editingDonorId || state.editingMemberId) {
         state.editingBudgetId = null;
         state.editingDonorId = null;
         state.editingMemberId = null;
@@ -4031,7 +4111,14 @@
         return;
       }
 
-      // 5. Hayırsever detay (Hayır Defteri) sayfası açıksa kapat
+      // 5. Hane detay modalı açıksa sadece detay modalını kapat
+      if (state.selectedAidId) {
+        state.selectedAidId = null;
+        render();
+        return;
+      }
+
+      // 6. Hayırsever detay (Hayır Defteri) bölümü açıksa kapat ve Hayırseverler listesine dön
       if (state.viewingDonorDetails) {
         state.viewingDonorDetails = null;
         saveNavState();
@@ -4039,7 +4126,7 @@
         return;
       }
 
-      // 6. Sorumlu kişisel kasa sayfası açıksa kapat
+      // 7. Sorumlu kişisel kasa bölümü açıksa kapat ve Sandık ekranına dön
       if (state.viewingMemberKasa) {
         state.viewingMemberKasa = null;
         saveNavState();
@@ -4047,7 +4134,23 @@
         return;
       }
 
-      // 7. Kategori listeleme sayfası açıksa kapat
+      // 8. Sandık alt sekmelerindeyse ('sorumlular' veya 'devirler') -> Genel Sandık'a dön
+      if (state.activeTab === 'kasa' && state.kasaSubTab !== 'genel') {
+        state.kasaSubTab = 'genel';
+        saveNavState();
+        render();
+        return;
+      }
+
+      // 9. Gönüllü alt sekmelerindeyse ('yonetim' veya 'gunluk') -> Gönüllü Rehberi'ne dön
+      if (state.activeTab === 'ekip' && state.adminSubTab !== 'rehber') {
+        state.adminSubTab = 'rehber';
+        saveNavState();
+        render();
+        return;
+      }
+
+      // 10. Kategori listeleme sayfası açıksa sadece listeyi kapat ve Haneler özetine dön
       if (state.viewingStatusList) {
         state.viewingStatusList = null;
         state.searchQuery = '';
@@ -4056,7 +4159,7 @@
         return;
       }
 
-      // 8. Başka bir sekmede ise ('yeni', 'kasa', 'bagiscilar', 'ekip') -> Haneler ana sayfasına dön
+      // 11. Başka bir ana bölümdeyse ('yeni', 'kasa', 'bagiscilar', 'ekip') -> o bölümü kapatıp Haneler ana ekranına dön
       if (state.activeTab !== 'yardimlar') {
         state.activeTab = 'yardimlar';
         state.viewingStatusList = null;
@@ -4065,42 +4168,30 @@
         state.newPhotos = [];
         saveNavState();
         render();
-        showToast('← Haneler ana sayfasına dönüldü.');
         return;
       }
 
-      // 9. Zaten Haneler ana sayfasında ve açık pencere yoksa: 2 Kere Basarak Güvenli Çıkış (Double-Tap Back to Exit)
-      var now = Date.now();
-      if (now - lastBackPressTime < 2000) {
-        showToast('🚪 Hâre kapatılıyor...');
-        try {
-          if (window.navigator && window.navigator.app && window.navigator.app.exitApp) {
-            window.navigator.app.exitApp();
-          } else {
-            history.go(-history.length);
-          }
-        } catch(e) {}
-        return;
-      } else {
-        lastBackPressTime = now;
-        showToast('🚪 Çıkmak için 2 saniye içinde tekrar basın');
-        ensureHistoryBuffer();
-        return;
-      }
+      // 12. Zaten Haneler ana ekranındaysa: Uygulamayı ASLA kapatma, mevcut ekranda kal
+    };
+
+    window.addEventListener('popstate', function(event) {
+      window.handleBackNavigation();
     });
 
-    // Kullanıcının her ekrana dokunuşunda geçmiş tamponunu taze tut
+    // Android Cordova / WebIntoApp yerel donanım geri tuşu köprüsü
+    document.addEventListener('backbutton', function(event) {
+      if (event && typeof event.preventDefault === 'function') event.preventDefault();
+      window.handleBackNavigation();
+    }, false);
+
+    // Kullanıcının ekrana dokunuşunda geçmiş tamponunun tükenmemesini sağla
     document.addEventListener('click', function() {
-      ensureHistoryBuffer();
+      if (!window.location.hash || window.location.hash === '#hare-0' || window.location.hash === '#hare-1') {
+        ensureHistoryBuffer();
+      }
     }, { passive: true });
 
-    // İlk açılışta geçmiş tamponunu oluştur (Android canGoBack() her zaman açık kalsın)
-    try {
-      history.replaceState({ hareNav: 'root' }, '');
-      for (let histIdx = 0; histIdx < 4; histIdx++) {
-        history.pushState({ hareNav: 'guard' }, '');
-      }
-    } catch(e) {}
+    initHistoryGuard();
 
     window.setTab = function(tab) {
       if (state.activeTab !== tab) {
@@ -4154,23 +4245,77 @@
       render();
     };
 
-// window.shareWhatsApp yukarıda güvenli tekil fonksiyon olarak tanımlandı.
-
-
-    // 🔒 OTURUM YÖNETİMİ: Uygulama kapatıldığında veya arka plandan silindiğinde PIN sorsun
+    // =========================================================================
+    // 🔒 AKILLI OTURUM YÖNETİMİ:
+    // - Arka plana atıldığında, ekran kilitlendiğinde, WhatsApp/Harita/Kamera açıldığında veya F5'te OTURUM AÇIK KALIR.
+    // - Sadece uygulama tamamen kapatıldığında (arka plandan silindiğinde) yeniden açılışta PIN İSTER.
+    // =========================================================================
+    var wasRestoredFromActiveSession = false;
     try {
-      // 1. Önce aktif oturum (sessionStorage) var mı? (Sayfa yenilemede - F5'te oturumu korur)
-      var sessionUser = sessionStorage.getItem('hare_session_user');
-      if (sessionUser) {
-        state.currentUser = JSON.parse(sessionUser);
-      } else if (localStorage.getItem('hare_remember_me') === '1') {
-        // 2. Yalnızca kullanıcı açıkça "Beni Hatırla" işaretlediyse kalıcı girişi al
+      var restoredUser = null;
+
+      // 1. Aktif sekme / WebView belleği (sessionStorage)
+      var sessionRaw = sessionStorage.getItem('hare_session_user');
+      if (sessionRaw) {
+        restoredUser = JSON.parse(sessionRaw);
+        wasRestoredFromActiveSession = true;
+      }
+
+      // 2. Aynı WebView pencere ismi (file:// protokolünde sessionStorage sıfırlansa dahi pencere kapanmadıkça korunur)
+      if (!restoredUser && typeof window.name === 'string' && window.name.indexOf('HARE_SESSION:') === 0) {
+        restoredUser = JSON.parse(window.name.slice('HARE_SESSION:'.length));
+        wasRestoredFromActiveSession = true;
+      }
+
+      // 3. Uygulama süreci (APK Process) çerezi: Uygulama arka plandayken (tamamen kapatılmadıkça) yaşar
+      if (!restoredUser && typeof document.cookie === 'string' && document.cookie.indexOf('hare_session_active=1') !== -1) {
+        var bgRawCookie = localStorage.getItem('hare_bg_user');
+        if (bgRawCookie) {
+          restoredUser = JSON.parse(bgRawCookie);
+          wasRestoredFromActiveSession = true;
+        }
+      }
+
+      // 4. Harici uygulama (Kamera, WhatsApp, Harita, Telefon) dönüşü veya arka plan uyanması
+      if (!restoredUser) {
+        var extTs = Number(localStorage.getItem('hare_external_intent_ts') || 0);
+        var hbTs = Number(localStorage.getItem('hare_heartbeat_ts') || 0);
+        var appClosed = localStorage.getItem('hare_app_closed') === '1';
+        var nowTs = Date.now();
+        var isReloadNav = false;
+        try {
+          if (window.performance) {
+            var navEntries = window.performance.getEntriesByType && window.performance.getEntriesByType('navigation');
+            if (navEntries && navEntries.length > 0 && (navEntries[0].type === 'reload' || navEntries[0].type === 'back_forward')) {
+              isReloadNav = true;
+            } else if (window.performance.navigation && (window.performance.navigation.type === 1 || window.performance.navigation.type === 2)) {
+              isReloadNav = true;
+            }
+          }
+        } catch(e) {}
+
+        // Harici uygulamadan (Kamera/Harita/WhatsApp) son 15 dk içinde dönüldüyse veya arka planda canlı kalp atışı varsa
+        if ((extTs && (nowTs - extTs < 15 * 60 * 1000)) || isReloadNav || (!appClosed && hbTs && (nowTs - hbTs < 6000))) {
+          var bgRaw = localStorage.getItem('hare_bg_user');
+          if (bgRaw) {
+            restoredUser = JSON.parse(bgRaw);
+            wasRestoredFromActiveSession = true;
+          }
+        }
+      }
+
+      // 5. Kullanıcı "Oturumu sürekli açık tut (Beni hatırla)" seçtiyse
+      if (!restoredUser && localStorage.getItem('hare_remember_me') === '1') {
         var savedUser = localStorage.getItem('hare_user');
         if (savedUser) {
-          state.currentUser = JSON.parse(savedUser);
+          restoredUser = JSON.parse(savedUser);
         }
+      }
+
+      if (restoredUser) {
+        state.currentUser = restoredUser;
+        saveActiveSession(restoredUser);
       } else {
-        // 3. Normalde uygulama her sıfırdan açıldığında güvenlik için oturumu kapalı başlat
         state.currentUser = null;
         localStorage.removeItem('hare_user');
       }
@@ -4180,13 +4325,23 @@
       }
     } catch(e) {}
 
-    restoreNavState();
+    restoreNavState(wasRestoredFromActiveSession);
     loadAutoBackupsList();
     render();
     if (state.currentUser) {
       checkAndPerformAutoDailyBackup();
       syncFromGoogleSheet(true);
     }
+
+    // Canlı süreç kalp atışı (Uygulama açıkken veya arka planda bellekteyken oturumu canlı tutar)
+    setInterval(function() {
+      if (state.currentUser) {
+        try {
+          localStorage.setItem('hare_heartbeat_ts', String(Date.now()));
+        } catch(e) {}
+      }
+    }, 2000);
+
     setInterval(function() {
       // Ekran kapalıyken veya internet yokken veya halihazırda istek sürerken boşuna istek atma
       if (document.hidden) return;
@@ -4196,13 +4351,28 @@
       }
     }, 30000);
 
-    // 📱 EKRAN KAPANMA / UYKU KORUMASI VE OTOMATİK UYANMA MOTORU (Android & iOS WebView Uyumlu)
+    // 📱 EKRAN KAPANMA / ARKA PLAN KORUMASI VE OTOMATİK UYANMA MOTORU
     document.addEventListener('visibilitychange', function() {
-      if (!document.hidden) {
-        // Ekran açıldığında askıda kalmış durumları sıfırla
+      if (document.hidden) {
+        // Uygulama arka plana atıldığında oturumu ve mevcut ekran konumunu koru (Çıkış yapma!)
+        if (state.currentUser) {
+          saveActiveSession(state.currentUser);
+          saveNavState();
+        }
+      } else {
+        // Arka plandan geri dönüldüğünde oturumu ve ekranı kesintisiz sürdür
+        if (!state.currentUser) {
+          try {
+            var bgUser = sessionStorage.getItem('hare_session_user') || localStorage.getItem('hare_bg_user');
+            if (bgUser) {
+              state.currentUser = JSON.parse(bgUser);
+              saveActiveSession(state.currentUser);
+              render();
+            }
+          } catch(e) {}
+        }
         state.isSyncing = false;
         state.isPushing = false;
-        // Telefonun Wi-Fi veya hücresel ağı uyanıp bağlanması için kısa bir pay (600ms) tanı
         setTimeout(function() {
           if (!document.hidden && (!('onLine' in navigator) || navigator.onLine) && state.currentUser && state.sheetUrl) {
             syncFromGoogleSheet(true);
