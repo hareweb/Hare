@@ -172,14 +172,16 @@ Bu belgede, Hâre İnsani Yardım ve Ekip Koordinasyon Platformu'nda yapılan so
 
 ---
 
-### 17. 📱 Alt Menü Tasarımı ve Tema Yeşili Sabitlemesi (Android Gezinti Çubuğu Çakışma Çözümü)
-- **Sorun:** Eski tasarımda alt menü çubuğu sayfa tabanının biraz yukarısında yüzen beyaz bir kart (`bottom-3 rounded-2xl bg-white`) şeklindeydi. Bu durum telefonun kendi Android sanal gezinti çubuğunun (üçgen geri, daire ana ekran, kare son uygulamalar tuşları) menü butonlarının ve metinlerinin ("Haneler", "Sandık", "Hane Ekle", "Hayırsever", "Gönüllü") tam üzerine binmesine ve tuşların birbiriyle karışarak okunamaz hale gelmesine neden oluyordu.
-- **Çözüm:**
-  1. **Tabana Sabitlenmiş Gövde (Docked Bar):** Alt menü çubuğu ekranın en alt tabanına (`bottom-0`) sıfırlandı ve genişliği ekranı tam dolduracak şekilde (`w-full max-w-md`) genişletildi.
-  2. **Tema Yeşili Zemin Dolgusu:** Menünün tamamı ve telefonun gezinti tuşlarının altına denk gelen alan zengin tema zümrüt yeşili (`bg-emerald-950` / `#064e3b`) ile kaplandı; üst kısmına şık bir `border-t border-emerald-800/80` ve `rounded-t-3xl` kavis eklendi.
-  3. **Güvenli Alan Dolgusu (Safe Area Padding):** Butonların altına `pb-7` ve `max(1.75rem, calc(env(safe-area-inset-bottom) + 1.25rem))` güvenlik payı eklendi. Android'in sanal tuşları bu boşlukta tamamen tema yeşili zemin üzerinde kalır ve buton etiketlerini kesinlikle kapatamaz.
-  4. **Yüksek Kontrastlı Butonlar ve Merkez Tuş:**
-     - Aktif sekme: Zümrüt parıltılı gösterge noktası, parlak beyaz başlık (`text-white font-extrabold`) ve nane yeşili etiket.
-     - Pasif sekmeler: Açık nane/yeşil tonlarında yüksek okunurluk (`text-emerald-300/70`).
-     - "+ Hane Ekle" butonu: Menünün üstünden hafifçe taşan, `ring-4 ring-emerald-950` zırhlı ve canlı zümrüt yeşili (`bg-emerald-600`) büyük yuvarlak buton.
-  5. **İçerik Kaydırma Boşluğu:** Ana sayfa ve alt listelerin alt boşluğu `pb-28`'den `pb-36`'ya çıkarılarak en alttaki son kayıtların da menü arkasında kalmadan rahatça görüntülenmesi sağlandı.
+### 17. 📱 Alt Menü Tasarımı: Beyaz Menü Kartı + Tema Yeşili Sistem Tuşları Barı
+- **Kullanıcı Talebi:** Uygulamanın 5 bölümü (Haneler, Sandık, Hane Ekle, Hayırsever, Gönüllü) önceki beyaz, yuvarlak hatlı ve şık tasarımında kalsın; telefonun alt sanal tuşlarının / hareket çubuğunun bulunduğu zemin ise sistemin zümrüt yeşili (`#065f46`) ile kaplansın.
+- **Uygulanan Çözüm (Çift Katmanlı Alt Çubuk Mimarisi):**
+  1. **Bizim Bölümler (Beyaz Menü Kartı):**
+     - Zemin: Arka planı hafif buzlu beyaz (`bg-white/98 backdrop-blur-xl`), üst köşeleri kavisli (`rounded-t-3xl`), üst kenarlık (`border-t border-slate-200/90`) ve yumuşak gölge (`shadow-[0_-8px_30px_rgba(0,0,0,0.12)]`).
+     - Butonlar: `188450.jpg` ekranındaki özgün beyaz zeminli tasarım korundu. Aktif sekmede koyu zümrüt yeşili başlık (`text-emerald-800 font-extrabold`) ve altında yeşil parıltılı nokta gösterge yer alır. Pasif sekmeler sade ve net gri/slate tonlarındadır.
+     - Merkez "+ Hane Ekle": Menünün üstünden hafifçe taşan, koyu yeşil halkalı (`ring-4 ring-emerald-950`) ve canlı zümrüt yeşili yuvarlak eylem butonu.
+  2. **Tuşların Barı (Sistemin Yeşili):**
+     - Beyaz menü kartının hemen altına ekranın en tabanına oturan `safe-system-bar` eklendi.
+     - Rengi: Hâre'nin ana tema yeşili (`#065f46` / `bg-emerald-900`).
+     - Yüksekliği: `max(1.5rem, calc(env(safe-area-inset-bottom, 0px) + 0.6rem))` (asgari 24px - 34px).
+     - Sonuç: Android'in 3 sanal gezinti tuşu (üçgen geri, daire ana ekran, kare son uygulamalar) veya yatay hareket çizgisi tamamen bu zümrüt yeşili zemin üzerinde kalır; yukarıdaki beyaz menü butonlarıyla ve yazılarıyla asla çakışmaz.
+  3. **İçerik Kaydırma Boşluğu:** Sayfa altlarındaki son kayıtların menü arkasında kaybolmaması için ana gövde alt boşluğu `pb-36` seviyesinde tutuldu.

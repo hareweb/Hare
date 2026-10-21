@@ -2,7 +2,8 @@
 <html lang="tr">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
+  <meta name="navigation-bar-color" content="#065f46">
   <title>Hâre — İnsani Yardım Halkası</title>
   
   <meta name="theme-color" content="#065f46">
@@ -53,7 +54,7 @@
     h1, h2, h3, .font-display { font-family: 'Outfit', sans-serif; }
     .hide-scrollbar::-webkit-scrollbar { display: none; }
     .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-    .safe-bottom-nav { padding-bottom: max(1.75rem, calc(env(safe-area-inset-bottom, 0px) + 1.25rem)); }
+    .safe-system-bar { height: max(1.5rem, calc(env(safe-area-inset-bottom, 0px) + 0.6rem)); min-height: 22px; }
   </style>
 </head>
 <body class="bg-slate-100 text-slate-800 antialiased flex justify-center min-h-screen">
@@ -2634,7 +2635,7 @@
         '</div>';
       }
 
-      // 5'Lİ ALT MENÜ (SABİTLENMİŞ TEMA YEŞİLİ ALT BAR - ANDROID GEZİNTİ ÇUBUĞU UYUMLU)
+      // 5'Lİ ALT MENÜ - BİZİM BÖLÜMLER (ÖNCEKİ BEYAZ TASARIM) + TUŞLARIN BARI (SİSTEMİN YEŞİLİ)
       var navTabs = [
         { id: 'yardimlar', icon: '📋', label: 'Haneler' },
         { id: 'kasa', icon: '🗳️', label: 'Sandık' },
@@ -2647,26 +2648,30 @@
         var isCurrent = state.activeTab === tab.id;
         if (tab.isCenter) {
           return '<button onclick="setTab(\'yeni\')" class="flex flex-col items-center flex-1 -mt-7 active:scale-95 transition-transform group" title="Yeni Hane Ekle">' +
-            '<div class="w-12 h-12 rounded-full ' + (isCurrent ? 'bg-emerald-400 text-emerald-950 shadow-emerald-400/50' : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/60') + ' ring-4 ring-emerald-950 flex items-center justify-center text-2xl font-black shadow-xl active:scale-90 transition-all leading-none pb-0.5">' +
+            '<div class="w-12 h-12 rounded-full ' + (isCurrent ? 'bg-emerald-600 text-white shadow-emerald-700/50' : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-800/40') + ' ring-4 ring-emerald-950 flex items-center justify-center text-2xl font-black shadow-xl active:scale-90 transition-all leading-none pb-0.5">' +
               '+' +
             '</div>' +
-            '<span class="text-[10px] mt-1 font-extrabold ' + (isCurrent ? 'text-emerald-300' : 'text-emerald-200/90') + '">' + esc(tab.label) + '</span>' +
+            '<span class="text-[10px] mt-1 font-extrabold ' + (isCurrent ? 'text-emerald-800' : 'text-emerald-700/80') + '">' + esc(tab.label) + '</span>' +
+            '<span class="w-1.5 h-1.5 mt-0.5 ' + (isCurrent ? 'rounded-full bg-emerald-500 shadow-[0_0_6px_#10b981]' : 'opacity-0') + '"></span>' +
           '</button>';
         }
 
-        var textColor = isCurrent ? 'text-white font-extrabold' : 'text-emerald-300/70 hover:text-white font-semibold';
-        var labelColor = isCurrent ? 'text-emerald-200 font-extrabold' : 'text-emerald-300/70 font-bold';
-        var indicator = isCurrent ? '<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-0.5 shadow-[0_0_6px_#34d399]"></span>' : '<span class="w-1.5 h-1.5 mt-0.5 opacity-0"></span>';
+        var textColor = isCurrent ? 'text-emerald-800 font-extrabold' : 'text-slate-400 hover:text-slate-600 font-semibold';
+        var labelColor = isCurrent ? 'text-emerald-800 font-extrabold' : 'text-slate-500 font-bold';
+        var indicator = isCurrent ? '<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mt-0.5 shadow-[0_0_6px_#10b981]"></span>' : '<span class="w-1.5 h-1.5 mt-0.5 opacity-0"></span>';
 
         return '<button onclick="setTab(\'' + tab.id + '\')" class="flex flex-col items-center flex-1 py-1 relative active:scale-95 transition-all ' + textColor + '">' +
-          '<span class="text-xl ' + (isCurrent ? 'scale-110 drop-shadow-sm' : 'opacity-80') + ' transition-transform">' + tab.icon + '</span>' +
+          '<span class="text-xl ' + (isCurrent ? 'scale-110 drop-shadow-sm' : 'opacity-75') + ' transition-transform">' + tab.icon + '</span>' +
           '<span class="text-[10px] mt-0.5 ' + labelColor + ' tracking-tight">' + esc(tab.label) + '</span>' +
           indicator +
         '</button>';
       }).join('');
 
-      html += '<nav class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-emerald-950/98 backdrop-blur-xl border-t border-emerald-800/80 shadow-[0_-8px_30px_rgba(0,0,0,0.35)] flex justify-around items-center pt-2.5 pb-7 px-1 z-40 rounded-t-3xl safe-bottom-nav">' +
-        navButtonsHTML +
+      html += '<nav class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md z-40 flex flex-col pointer-events-auto">' +
+        '<div class="w-full bg-white/98 backdrop-blur-xl border-t border-slate-200/90 rounded-t-3xl shadow-[0_-8px_30px_rgba(0,0,0,0.12)] flex justify-around items-center pt-2 pb-1.5 px-1">' +
+          navButtonsHTML +
+        '</div>' +
+        '<div class="w-full bg-[#065f46] border-t border-emerald-800/40 safe-system-bar" title="Sistem Gezinti Çubuğu"></div>' +
       '</nav>';
 
       root.innerHTML = html;
