@@ -439,15 +439,22 @@
         var raw = sessionStorage.getItem('hare_nav_state');
         if (raw) {
           var nav = JSON.parse(raw);
-          if (nav.activeTab) state.activeTab = nav.activeTab;
           if (nav.kasaSubTab) state.kasaSubTab = nav.kasaSubTab;
           if (nav.adminSubTab) state.adminSubTab = nav.adminSubTab;
-          if (nav.viewingMemberKasa !== undefined) state.viewingMemberKasa = nav.viewingMemberKasa;
-          if (nav.viewingDonorDetails !== undefined) state.viewingDonorDetails = nav.viewingDonorDetails;
-          if (nav.viewingStatusList !== undefined) state.viewingStatusList = nav.viewingStatusList;
           if (nav.selectedFilter) state.selectedFilter = nav.selectedFilter;
         }
       } catch(e) {}
+      // 📱 GİRİŞTE VE HER AÇILIŞTA DAİMA HANELER (YARDIMLAR) BÖLÜMÜNDE AÇILSIN
+      state.activeTab = 'yardimlar';
+      state.viewingStatusList = null;
+      state.viewingMemberKasa = null;
+      state.viewingDonorDetails = null;
+      state.selectedAidId = null;
+      state.editingAidId = null;
+      state.editingBudgetId = null;
+      state.editingDonorId = null;
+      state.editingMemberId = null;
+      state.changingPin = false;
     }
 
     // =========================================================================
@@ -491,6 +498,13 @@
           state.currentUser = data.user;
           try { localStorage.setItem('hare_user', JSON.stringify(data.user)); } catch(e) {}
           state.loginError = '';
+          state.activeTab = 'yardimlar'; // GİRİŞTE DAİMA HANELER BÖLÜMÜNDE AÇILSIN
+          state.viewingStatusList = null;
+          state.viewingMemberKasa = null;
+          state.viewingDonorDetails = null;
+          state.selectedAidId = null;
+          state.editingAidId = null;
+          saveNavState();
           await syncFromGoogleSheet(false);
           return;
         } else if (data && data.status === 'error' && !isPinCorrectLocally) {
@@ -516,6 +530,13 @@
         };
         try { localStorage.setItem('hare_user', JSON.stringify(state.currentUser)); } catch(e) {}
         state.loginError = '';
+        state.activeTab = 'yardimlar'; // GİRİŞTE DAİMA HANELER BÖLÜMÜNDE AÇILSIN
+        state.viewingStatusList = null;
+        state.viewingMemberKasa = null;
+        state.viewingDonorDetails = null;
+        state.selectedAidId = null;
+        state.editingAidId = null;
+        saveNavState();
         render();
         // Arka planda sunucu açıksa veriyi çekmeyi dene
         syncFromGoogleSheet(true);
@@ -3360,12 +3381,14 @@
       if (district.trim()) parts.push(district.trim());
       if (city.trim()) parts.push(city.trim());
 
-      if (parts.length === 0 && address.trim().length === 0) {
-        showToast('Lütfen önce formdaki İlçe veya Mahalle kutusunu doldurunuz.');
+      var query = parts.length > 0 ? parts.join(', ') : address.trim();
+      if (!query && city.trim()) query = city.trim();
+
+      if (!query) {
+        showToast('Lütfen formdaki İl, İlçe veya Mahalle kutusunu doldurunuz.');
         return false;
       }
 
-      var query = parts.length > 0 ? parts.join(', ') : address.trim();
       var mapUrl = 'https://maps.google.com/?q=' + encodeURIComponent(query);
       if (input) {
         input.value = mapUrl;
@@ -3388,25 +3411,20 @@
         return;
       }
 
-      if (btn) btn.innerHTML = '<span>⏳ Alınıyor...</span>';
-      showToast('📍 Konum alınıyor, lütfen bekleyiniz...');
+      if (btn) btn.innerHTML = '<span>⏳ GPS Başlatılıyor...</span>';
+      showToast('📍 Konum servisi başlatılıyor, lütfen bekleyiniz...');
 
       var isResolved = false;
-      var watchId = null;
+      var tickerTimer = null;
       var safetyTimer = null;
+      var secondsPassed = 0;
 
       function cleanup() {
-        if (watchId !== null) {
-          try { navigator.geolocation.clearWatch(watchId); } catch(e) {}
-          watchId = null;
-        }
-        if (safetyTimer !== null) {
-          clearTimeout(safetyTimer);
-          safetyTimer = null;
-        }
+        if (tickerTimer !== null) { clearInterval(tickerTimer); tickerTimer = null; }
+        if (safetyTimer !== null) { clearTimeout(safetyTimer); safetyTimer = null; }
       }
 
-      function applyPosition(pos) {
+      function applyPosition(pos, sourceLabel) {
         if (isResolved) return;
         isResolved = true;
         cleanup();
@@ -3419,7 +3437,8 @@
           input.value = 'https://maps.google.com/?q=' + lat + ',' + lon;
         }
         if (btn) btn.innerHTML = '<span>✅ Konum Alındı</span>';
-        showToast('📍 GPS Konumu başarıyla alındı: ' + lat + ', ' + lon + (acc ? ' (±' + acc + 'm)' : ''));
+        var srcText = sourceLabel ? ' (' + sourceLabel + ')' : '';
+        showToast('📍 GPS Konumu alındı' + srcText + ': ' + lat + ', ' + lon + (acc ? ' (±' + acc + 'm)' : ''));
       }
 
       function fallbackWithExplanation(reasonText) {
@@ -3437,58 +3456,95 @@
         }
       }
 
-      // 1. ÖNCELİK: Hızlı Ağ / Önbellek Konumu (Android WebView'de donmayı önleyen yöntem)
-      // enableHighAccuracy: false ile başlayarak telefonun baz istasyonu, WiFi ve önbelleğindeki son konumu 0.3 saniyede çeker
+      // Canlı buton geri bildirim sayacı
+      tickerTimer = setInterval(function() {
+        secondsPassed++;
+        if (isResolved) return;
+        if (btn) {
+          if (secondsPassed < 4) {
+            btn.innerHTML = '<span>⏳ Konum Bekleniyor (' + secondsPassed + 's)...</span>';
+          } else if (secondsPassed < 10) {
+            btn.innerHTML = '<span>🛰️ Uydular Taranıyor (' + secondsPassed + 's)...</span>';
+          } else {
+            btn.innerHTML = '<span>📡 Sinyal Güçlendiriliyor (' + secondsPassed + 's)...</span>';
+          }
+        }
+      }, 1000);
+
+      // 1. AŞAMA: Anında Hazır Önbellek / Hızlı Ağ Kontrolü (Varsa 0.2 saniyede çözer)
       try {
-        watchId = navigator.geolocation.watchPosition(
+        navigator.geolocation.getCurrentPosition(
           function(pos) {
-            applyPosition(pos);
+            applyPosition(pos, 'Hızlı Konum');
           },
           function(err) {
-            // watchPosition başarısız olursa tek seferlik getCurrentPosition dene
-            tryFallbackSingleShot(err);
+            startHighAccuracyGps();
           },
           {
             enableHighAccuracy: false,
-            timeout: 5000,
-            maximumAge: 300000 // Son 5 dakikadaki hazır konumu anında kabul et
+            timeout: 2500,
+            maximumAge: 600000 // Son 10 dakikadaki hazır konumu anında kabul et
           }
         );
-      } catch(err) {
-        tryFallbackSingleShot(err);
+      } catch(e) {
+        startHighAccuracyGps();
       }
 
-      // 2. ÖNCELİK: 6.5 saniyelik emniyet zamanlayıcısı (Kullanıcıyı asla ekranda asılı bırakmaz)
-      safetyTimer = setTimeout(function() {
-        if (!isResolved) {
-          fallbackWithExplanation('Mobil GPS zaman aşımına uğradı.');
-        }
-      }, 6500);
-
-      function tryFallbackSingleShot(initialErr) {
+      // 2. AŞAMA: Canlı Yüksek Hassasiyetli GPS (Mobil uydular için gerçekçi 16 saniyelik pay)
+      function startHighAccuracyGps() {
+        if (isResolved) return;
         try {
           navigator.geolocation.getCurrentPosition(
             function(pos) {
-              applyPosition(pos);
+              applyPosition(pos, 'Canlı GPS');
             },
-            function(err2) {
-              var code = err2 ? err2.code : (initialErr ? initialErr.code : 0);
-              var msg = 'GPS sinyali alınamadı.';
-              if (code === 1) msg = 'Uygulamaya konum izni verilmedi.';
-              else if (code === 2) msg = 'Cihazda GPS/Konum servisi kapalı.';
-              else if (code === 3) msg = 'Konum arama zaman aşımına uğradı.';
-              fallbackWithExplanation(msg);
+            function(err) {
+              var code = err ? err.code : 0;
+              if (code === 1) {
+                fallbackWithExplanation('Uygulamaya konum izni verilmedi.');
+              } else {
+                tryNetworkFallback();
+              }
             },
             {
               enableHighAccuracy: true,
-              timeout: 3000,
-              maximumAge: 60000
+              timeout: 16000, // Mobil GPS donanımının uyduları bulabilmesi için gereken gerçekçi süre
+              maximumAge: 0
+            }
+          );
+        } catch(e) {
+          tryNetworkFallback();
+        }
+      }
+
+      // 3. AŞAMA: Ağ / Baz İstasyonu Fallback (Kapalı mekanda uydu görünmüyorsa)
+      function tryNetworkFallback() {
+        if (isResolved) return;
+        try {
+          navigator.geolocation.getCurrentPosition(
+            function(pos) {
+              applyPosition(pos, 'Ağ/Baz İstasyonu');
+            },
+            function(err) {
+              fallbackWithExplanation('GPS uyduları kapalı alanda bulunamadı.');
+            },
+            {
+              enableHighAccuracy: false,
+              timeout: 4000,
+              maximumAge: 600000
             }
           );
         } catch(e) {
           fallbackWithExplanation('Konum servisi yanıt vermedi.');
         }
       }
+
+      // 4. AŞAMA: 22 saniyelik nihai güvenlik zamanlayıcısı
+      safetyTimer = setTimeout(function() {
+        if (!isResolved) {
+          fallbackWithExplanation('GPS arama süresi aşıldı.');
+        }
+      }, 22000);
     };
 
     window.openMapForAid = function(id) {
@@ -3761,38 +3817,62 @@
       } catch(e) {}
     }
 
+    function ensureHistoryBuffer() {
+      try {
+        // 🛡️ Android WebView'de canGoBack()'in daima true kalmasını ve uygulamanın kazara kapanmasını önleyen emniyet tamponu
+        history.pushState({ hareNav: 'buffer', timestamp: Date.now() }, '');
+      } catch(e) {}
+    }
+
     window.addEventListener('popstate', function(event) {
-      // 🛡️ Harici WhatsApp veya arama sonrası geri basıldığında uygulamayı kapatmayı engelle
+      // 🛡️ Harici WhatsApp veya telefon araması sonrası geri dönüldüğünde uygulamayı asla kapatma
       if (event.state && event.state.hareNav === 'external') {
+        ensureHistoryBuffer();
         return;
       }
-      // 0. Hayırsever detay (Hayır Defteri) sayfası açıksa kapat
+
+      // Her geri tuşunda geçmiş tamponunu anında tazele (Android'in super.onBackPressed() ile uygulamayı öldürmesini engeller)
+      ensureHistoryBuffer();
+
+      // 0. Onay penceresi açıksa kapat
+      var confirmModal = document.getElementById('custom-confirm-modal');
+      if (confirmModal && confirmModal.style.display !== 'none') {
+        closeCustomConfirm();
+        return;
+      }
+      // 1. PIN Değiştirme modalı açıksa kapat
+      if (state.changingPin) {
+        state.changingPin = false;
+        render();
+        return;
+      }
+      // 2. Hayırsever detay (Hayır Defteri) sayfası açıksa kapat
       if (state.viewingDonorDetails) {
         state.viewingDonorDetails = null;
         saveNavState();
         render();
         return;
       }
-      // 1. Sorumlu kişisel kasa sayfası açıksa kapat
+      // 3. Sorumlu kişisel kasa sayfası açıksa kapat
       if (state.viewingMemberKasa) {
         state.viewingMemberKasa = null;
         saveNavState();
         render();
         return;
       }
-      // 2. Fotoğraf ışık kutusu açıksa kapat
+      // 4. Fotoğraf ışık kutusu açıksa kapat
       if (state.viewingPhotoUrl) {
         state.viewingPhotoUrl = null;
         render();
         return;
       }
-      // 3. Hane detay modalı açıksa kapat
+      // 5. Hane detay modalı açıksa kapat
       if (state.selectedAidId) {
         state.selectedAidId = null;
         render();
         return;
       }
-      // 4. Düzenleme modalları açıksa kapat
+      // 6. Düzenleme modalları açıksa kapat
       if (state.editingAidId || state.editingBudgetId || state.editingDonorId || state.editingMemberId) {
         state.editingAidId = null;
         state.editingBudgetId = null;
@@ -3801,7 +3881,7 @@
         render();
         return;
       }
-      // 5. Kategori listeleme sayfası açıksa anasayfaya dön
+      // 7. Kategori listeleme sayfası açıksa anasayfaya dön
       if (state.viewingStatusList) {
         state.viewingStatusList = null;
         state.searchQuery = '';
@@ -3809,25 +3889,27 @@
         render();
         return;
       }
-      // 6. Başka bir sekmede ise (Kasa, Yeni, Bağışçı, Gönüllü) anasayfa (Haneler) sekmesine dön
+      // 8. Başka bir sekmede ise (Hane Ekle 'yeni', Sandık 'kasa', Hayırsever 'bagiscilar', Gönüllü 'ekip') anasayfa (Haneler) sekmesine dön
       if (state.activeTab !== 'yardimlar') {
         state.activeTab = 'yardimlar';
         state.viewingStatusList = null;
+        state.viewingMemberKasa = null;
+        state.viewingDonorDetails = null;
+        state.newPhotos = [];
         saveNavState();
         render();
+        showToast('← Haneler ana sayfasına dönüldü.');
         return;
       }
-      // 7. Zaten anasayfada ve her şey kapalı ise uygulamadan kazara atılmayı engelle
-      try {
-        history.pushState({ hareNav: 'root' }, '');
-      } catch(e) {}
-      showToast('Uygulamadan çıkmak için sağ üstteki Çıkış butonunu kullanabilirsiniz.');
+      // 9. Zaten anasayfada (Haneler) ve hiçbir pencere açık değilken geri tuşuna basıldıysa
+      showToast('Uygulamadan çıkmak için sağ üstteki Çıkış (🚪) butonunu kullanabilirsiniz.');
     });
 
-    // İlk açılışta geçmiş kökü oluştur
+    // İlk açılışta geçmiş kökünü ve güvenlik tamponunu oluştur
     try {
       history.replaceState({ hareNav: 'root' }, '');
       history.pushState({ hareNav: 'app' }, '');
+      history.pushState({ hareNav: 'buffer' }, '');
     } catch(e) {}
 
     window.setTab = function(tab) {
