@@ -1591,7 +1591,7 @@
           '<div><label class="text-xs font-bold text-slate-500 uppercase">İletişim Numarası</label><input id="newPhone" type="tel" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm mt-1 font-semibold outline-none focus:ring-2 focus:ring-emerald-600" placeholder="05XXXXXXXXX" /></div>' +
           '<div><label class="text-xs font-bold text-slate-500 uppercase">Açık Adres ve Yol Tarifi</label><textarea id="newAddress" rows="2" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm mt-1 outline-none focus:ring-2 focus:ring-emerald-600" placeholder="Cadde, sokak, bina no, kat..."></textarea></div>' +
           '<div>' +
-            '<div class="flex justify-between items-center mb-1"><label class="text-xs font-bold text-slate-500 uppercase">Google Harita Konumu</label><button type="button" id="geoBtn" onclick="getCurrentLocation(\'newMapsUrl\')" class="text-[11px] bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-lg font-bold hover:bg-emerald-100 flex items-center space-x-1"><span>📍 Mevcut Konumumu Al</span></button></div>' +
+            '<div class="flex justify-between items-center mb-1"><label class="text-xs font-bold text-slate-500 uppercase">Google Harita Konumu</label><div class="flex items-center space-x-1.5"><button type="button" id="geoBtn" onclick="getCurrentLocation(\'newMapsUrl\', this)" class="text-[11px] bg-emerald-50 text-emerald-800 border border-emerald-200 px-2.5 py-1 rounded-xl font-bold hover:bg-emerald-100 flex items-center space-x-1 active:scale-95 transition-all shadow-xs"><span>📍 Mevcut Konumumu Al</span></button><button type="button" onclick="generateMapLinkFromAddress(\'newMapsUrl\')" title="Girilen mahalle ve ilçeden harita linki oluşturur" class="text-[11px] bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-200 px-2.5 py-1 rounded-xl font-bold flex items-center space-x-1 active:scale-95 transition-all shadow-xs"><span>🗺️ Adresten Üret</span></button></div></div>' +
             '<input id="newMapsUrl" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm mt-1 outline-none focus:ring-2 focus:ring-emerald-600" placeholder="https://maps.google.com/..." />' +
           '</div>' +
           '<div><label class="text-xs font-bold text-slate-500 uppercase block mb-1">Fotoğraflar (En fazla 3 adet)</label><input type="file" id="photoInput" accept="image/*" multiple onchange="handlePhotoSelect(event)" class="text-xs text-slate-500 file:mr-2 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-emerald-50 file:text-emerald-800 hover:file:bg-emerald-100 cursor-pointer" /><div id="photoPreviewContainer" class="flex gap-2 mt-2"></div></div>' +
@@ -2483,7 +2483,7 @@
             '</div>' +
             '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Telefon</label><input id="editAidPhone" type="tel" value="' + esc(editingAid.phone || '') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
             '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Açık Adres</label><textarea id="editAidAddress" rows="2" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-medium outline-none focus:bg-white">' + esc(editingAid.address || '') + '</textarea></div>' +
-            '<div><div class="flex justify-between items-center mb-1"><label class="text-[11px] font-bold text-slate-500 uppercase">Harita Linki</label><button type="button" onclick="getCurrentLocation(\'editAidMapsUrl\')" class="text-[10px] bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded font-bold">📍 Konumu Yenile</button></div><input id="editAidMapsUrl" value="' + esc(editingAid.mapsUrl || '') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-medium outline-none focus:bg-white" /></div>' +
+            '<div><div class="flex justify-between items-center mb-1"><label class="text-[11px] font-bold text-slate-500 uppercase">Harita Linki</label><div class="flex items-center space-x-1.5"><button type="button" onclick="getCurrentLocation(\'editAidMapsUrl\', this)" class="text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-lg font-bold hover:bg-emerald-100 active:scale-95">📍 Konumu Yenile</button><button type="button" onclick="generateMapLinkFromAddress(\'editAidMapsUrl\')" class="text-[10px] bg-blue-50 text-blue-900 border border-blue-200 px-2 py-0.5 rounded-lg font-bold hover:bg-blue-100 active:scale-95">🗺️ Adresten Üret</button></div></div><input id="editAidMapsUrl" value="' + esc(editingAid.mapsUrl || '') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-medium outline-none focus:bg-white" /></div>' +
             '<div><label class="text-[11px] font-bold text-slate-500 uppercase">İhtiyaç ve Durum Notları</label><textarea id="editAidNotes" rows="2" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-medium outline-none focus:bg-white">' + esc(editingAid.notes || '') + '</textarea></div>' +
             '<button type="submit" class="w-full bg-emerald-800 text-white font-extrabold text-xs py-3 rounded-xl font-display shadow-md">Değişiklikleri Kaydet ve E-Tabloya Gönder</button>' +
           '</form>' +
@@ -3328,51 +3328,151 @@
       }
     };
 
+    // =========================================================================
+    // 📍 AKILLI HARİTA VE ADRESTEN KONUM ÜRETİCİSİ (Hızlı Fallback)
+    // =========================================================================
+    window.generateMapLinkFromAddress = function(targetInputId) {
+      var isEdit = targetInputId === 'editAidMapsUrl';
+      var city = (document.getElementById(isEdit ? 'editAidCity' : 'newCity') || {}).value || 'Kayseri';
+      var district = (document.getElementById(isEdit ? 'editAidDistrict' : 'newDistrict') || {}).value || '';
+      var neighborhood = (document.getElementById(isEdit ? 'editAidNeighborhood' : 'newNeighborhood') || {}).value || '';
+      var address = (document.getElementById(isEdit ? 'editAidAddress' : 'newAddress') || {}).value || '';
+      var input = document.getElementById(targetInputId || 'newMapsUrl');
+
+      var parts = [];
+      if (neighborhood.trim()) parts.push(neighborhood.trim() + ' Mah.');
+      if (district.trim()) parts.push(district.trim());
+      if (city.trim()) parts.push(city.trim());
+
+      if (parts.length === 0 && address.trim().length === 0) {
+        showToast('Lütfen önce formdaki İlçe veya Mahalle kutusunu doldurunuz.');
+        return false;
+      }
+
+      var query = parts.length > 0 ? parts.join(', ') : address.trim();
+      var mapUrl = 'https://maps.google.com/?q=' + encodeURIComponent(query);
+      if (input) {
+        input.value = mapUrl;
+      }
+      showToast('🗺️ ' + query + ' için harita konumu hazırlandı!');
+      return true;
+    };
+
+    // =========================================================================
+    // 🛰️ GELİŞMİŞ MOBİL VE WEB GPS KONUM MOTORU (Android WebView Tam Uyumlu)
+    // =========================================================================
     window.getCurrentLocation = function(targetInputId, btnEl) {
       var input = document.getElementById(targetInputId || 'newMapsUrl');
       var btn = btnEl;
       if (!btn && targetInputId === 'newMapsUrl') btn = document.getElementById('geoBtn');
 
       if (!navigator.geolocation) {
-        showToast('Cihazınızda konum servisi (GPS) desteklenmiyor.');
+        showToast('Cihazınızda GPS desteği bulunamadı, adres konumu üretiliyor...');
+        window.generateMapLinkFromAddress(targetInputId);
         return;
       }
 
       if (btn) btn.innerHTML = '<span>⏳ Alınıyor...</span>';
-      showToast('📍 GPS aranıyor, lütfen bekleyiniz...');
+      showToast('📍 Konum alınıyor, lütfen bekleyiniz...');
 
-      function applyPos(pos) {
+      var isResolved = false;
+      var watchId = null;
+      var safetyTimer = null;
+
+      function cleanup() {
+        if (watchId !== null) {
+          try { navigator.geolocation.clearWatch(watchId); } catch(e) {}
+          watchId = null;
+        }
+        if (safetyTimer !== null) {
+          clearTimeout(safetyTimer);
+          safetyTimer = null;
+        }
+      }
+
+      function applyPosition(pos) {
+        if (isResolved) return;
+        isResolved = true;
+        cleanup();
+
         var lat = pos.coords.latitude.toFixed(6);
         var lon = pos.coords.longitude.toFixed(6);
+        var acc = Math.round(pos.coords.accuracy || 0);
+
         if (input) {
           input.value = 'https://maps.google.com/?q=' + lat + ',' + lon;
         }
         if (btn) btn.innerHTML = '<span>✅ Konum Alındı</span>';
-        showToast('📍 Konum başarıyla alındı: ' + lat + ', ' + lon);
+        showToast('📍 GPS Konumu başarıyla alındı: ' + lat + ', ' + lon + (acc ? ' (±' + acc + 'm)' : ''));
       }
 
-      function onHighAccuracyError(err) {
-        navigator.geolocation.getCurrentPosition(
-          applyPos,
-          function(err2) {
-            var msg = 'Konum alınamadı: ';
-            var code = err2.code || err.code;
-            if (code === 1) msg += 'Lütfen cihaz/tarayıcı ayarlarından konum izni verin.';
-            else if (code === 2) msg += 'GPS sinyali bulunamadı. Açık alanda tekrar deneyebilirsiniz.';
-            else if (code === 3) msg += 'Zaman aşımı. Açık alanda tekrar deneyin veya link yapıştırın.';
-            else msg += (err2.message || err.message || 'Bilinmeyen hata');
-            showToast(msg);
-            if (btn) btn.innerHTML = '<span>📍 Tekrar Dene</span>';
+      function fallbackWithExplanation(reasonText) {
+        if (isResolved) return;
+        isResolved = true;
+        cleanup();
+
+        var fellBack = window.generateMapLinkFromAddress(targetInputId);
+        if (fellBack) {
+          if (btn) btn.innerHTML = '<span>📍 Adres Konumu Eklendi</span>';
+          showToast('⚠️ ' + reasonText + ' Formdaki adresten harita konumu otomatik oluşturuldu!');
+        } else {
+          if (btn) btn.innerHTML = '<span>📍 Tekrar Dene</span>';
+          showToast('⚠️ ' + reasonText + ' Lütfen telefonunuzun Konum (GPS) ayarını ve Hâre izinlerini kontrol ediniz.');
+        }
+      }
+
+      // 1. ÖNCELİK: Hızlı Ağ / Önbellek Konumu (Android WebView'de donmayı önleyen yöntem)
+      // enableHighAccuracy: false ile başlayarak telefonun baz istasyonu, WiFi ve önbelleğindeki son konumu 0.3 saniyede çeker
+      try {
+        watchId = navigator.geolocation.watchPosition(
+          function(pos) {
+            applyPosition(pos);
           },
-          { enableHighAccuracy: false, timeout: 15000, maximumAge: 300000 }
+          function(err) {
+            // watchPosition başarısız olursa tek seferlik getCurrentPosition dene
+            tryFallbackSingleShot(err);
+          },
+          {
+            enableHighAccuracy: false,
+            timeout: 5000,
+            maximumAge: 300000 // Son 5 dakikadaki hazır konumu anında kabul et
+          }
         );
+      } catch(err) {
+        tryFallbackSingleShot(err);
       }
 
-      navigator.geolocation.getCurrentPosition(
-        applyPos,
-        onHighAccuracyError,
-        { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
-      );
+      // 2. ÖNCELİK: 6.5 saniyelik emniyet zamanlayıcısı (Kullanıcıyı asla ekranda asılı bırakmaz)
+      safetyTimer = setTimeout(function() {
+        if (!isResolved) {
+          fallbackWithExplanation('Mobil GPS zaman aşımına uğradı.');
+        }
+      }, 6500);
+
+      function tryFallbackSingleShot(initialErr) {
+        try {
+          navigator.geolocation.getCurrentPosition(
+            function(pos) {
+              applyPosition(pos);
+            },
+            function(err2) {
+              var code = err2 ? err2.code : (initialErr ? initialErr.code : 0);
+              var msg = 'GPS sinyali alınamadı.';
+              if (code === 1) msg = 'Uygulamaya konum izni verilmedi.';
+              else if (code === 2) msg = 'Cihazda GPS/Konum servisi kapalı.';
+              else if (code === 3) msg = 'Konum arama zaman aşımına uğradı.';
+              fallbackWithExplanation(msg);
+            },
+            {
+              enableHighAccuracy: true,
+              timeout: 3000,
+              maximumAge: 60000
+            }
+          );
+        } catch(e) {
+          fallbackWithExplanation('Konum servisi yanıt vermedi.');
+        }
+      }
     };
 
     window.openMapForAid = function(id) {
