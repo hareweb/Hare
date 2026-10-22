@@ -703,7 +703,16 @@
       adminPanelSection: 'tumu', // 'tumu' | 'kurum' | 'kategoriler' | 'guvenlik' | 'medya' | 'veritabani'
       viewingAppsScriptModal: false,
       newMemberPermsDraft: null,
-      editMemberPermsDraft: null
+      editMemberPermsDraft: null,
+      donorCommTab: 'talep', // 'talep' | 'toplu'
+      selectedAidForRequest: '',
+      donorRequestNeedCategory: 'Acil Nakit / Erzak Desteği',
+      donorRequestAmount: '',
+      donorRequestCustomNote: '',
+      donorBulkTemplate: 'acil_cagri', // 'acil_cagri' | 'cuma_dua' | 'tesekkur_rapor' | 'iban_paylasim' | 'ozel'
+      donorBulkCustomText: '',
+      selectedDonorIdsForBulk: {},
+      preselectedDonorForTx: ''
     };
 
     // =========================================================================
@@ -793,7 +802,11 @@
       var meta = {
         c: copy.category || '',
         g: copy.giver || '',
-        r: copy.receiver || ''
+        r: copy.receiver || '',
+        dp: copy.donorPhone || '',
+        dc: copy.donorCity || '',
+        de: copy.donorEmail || '',
+        dn: copy.donorNotes || ''
       };
       copy.desc = cleanDesc + BUDGET_META_PREFIX + JSON.stringify(meta) + BUDGET_META_SUFFIX;
       return copy;
@@ -811,11 +824,100 @@
             if (!copy.category && meta.c) copy.category = meta.c;
             if (!copy.giver && meta.g) copy.giver = meta.g;
             if (!copy.receiver && meta.r) copy.receiver = meta.r;
+            if (!copy.donorPhone && meta.dp) copy.donorPhone = meta.dp;
+            if (!copy.donorCity && meta.dc) copy.donorCity = meta.dc;
+            if (!copy.donorEmail && meta.de) copy.donorEmail = meta.de;
+            if (!copy.donorNotes && meta.dn) copy.donorNotes = meta.dn;
           }
         } catch(e) {}
         copy.desc = rawDesc.replace(/\s*\[\[HM:\{.*?\}\]\]/g, '').trim();
       }
       return copy;
+    }
+
+    // 🔗 SANDIK VE HAYIRSEVER OTOMATİK ENTEGRASYON MOTORU
+    function upsertDonorFromBudget(name, phone, city, email, notes) {
+      var cleanName = String(name || '').trim();
+      if (!cleanName || cleanName === '__SYS__' || cleanName.toLowerCase() === 'hayırsever') return null;
+      if (!Array.isArray(state.donors)) state.donors = [];
+      var targetLower = cleanName.toLowerCase();
+      var existing = state.donors.find(function(d) {
+        return d && !isSystemCarrierRow(d) && String(d.name || '').trim().toLowerCase() === targetLower;
+      });
+      if (existing) {
+        var changed = false;
+        if (phone && String(phone).trim() && String(existing.phone || '').trim() !== String(phone).trim()) {
+          existing.phone = String(phone).trim();
+          changed = true;
+        }
+        if (city && String(city).trim() && String(existing.city || '').trim() !== String(city).trim()) {
+          existing.city = String(city).trim();
+          changed = true;
+        }
+        if (email && String(email).trim() && String(existing.email || '').trim() !== String(email).trim()) {
+          existing.email = String(email).trim();
+          changed = true;
+        }
+        if (notes && String(notes).trim() && String(existing.notes || '').trim() !== String(notes).trim()) {
+          existing.notes = String(notes).trim();
+          changed = true;
+        }
+        if (changed) {
+          markIdDirty(existing.id);
+          saveCacheItem('hare_cached_donors', state.donors);
+        }
+        return existing;
+      } else {
+        var newDonor = {
+          id: 'd-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+          name: cleanName,
+          phone: phone ? String(phone).trim() : '',
+          city: city ? String(city).trim() : ((state.settings && state.settings.defaultCity) || 'Kayseri'),
+          email: email ? String(email).trim() : '',
+          notes: notes ? String(notes).trim() : ''
+        };
+        state.donors.unshift(newDonor);
+        markIdDirty(newDonor.id);
+        saveCacheItem('hare_cached_donors', state.donors);
+        return newDonor;
+      }
+    }
+
+    function ensureDonorsSyncedFromBudget() {
+      if (!Array.isArray(state.budget)) return;
+      if (!Array.isArray(state.donors)) state.donors = [];
+      var changed = false;
+      state.budget.forEach(function(b) {
+        if (!b || b.type !== 'gelir' || !b.giver) return;
+        var gName = String(b.giver || '').trim();
+        if (!gName || gName === '__SYS__' || gName.toLowerCase() === 'hayırsever') return;
+        var gLower = gName.toLowerCase();
+        var found = state.donors.find(function(d) {
+          return d && !isSystemCarrierRow(d) && String(d.name || '').trim().toLowerCase() === gLower;
+        });
+        if (!found) {
+          var deterministicId = 'd-auto-' + gLower.replace(/[^a-z0-9ğüşıöç]/g, '_');
+          if (!isIdDeleted(deterministicId)) {
+            state.donors.push({
+              id: deterministicId,
+              name: gName,
+              phone: b.donorPhone || '',
+              city: b.donorCity || ((state.settings && state.settings.defaultCity) || 'Kayseri'),
+              email: b.donorEmail || '',
+              notes: b.donorNotes || (b.category ? b.category + ' bağışçısı' : '')
+            });
+            changed = true;
+          }
+        } else {
+          if (!found.phone && b.donorPhone) { found.phone = b.donorPhone; changed = true; }
+          if (!found.city && b.donorCity) { found.city = b.donorCity; changed = true; }
+          if (!found.email && b.donorEmail) { found.email = b.donorEmail; changed = true; }
+          if (!found.notes && b.donorNotes) { found.notes = b.donorNotes; changed = true; }
+        }
+      });
+      if (changed) {
+        saveCacheItem('hare_cached_donors', state.donors);
+      }
     }
 
     function isSystemCarrierRow(item) {
@@ -1264,6 +1366,7 @@
         state.donors = mergeSafeList(state.donors, extracted.donors, false);
         saveCacheItem('hare_cached_donors', state.donors);
       }
+      ensureDonorsSyncedFromBudget();
 
       // 3. Ekip üyeleri, roller, özel izinler ve PIN kodlarını eşitle
       if (Array.isArray(extracted.members) && extracted.members.length > 0) {
@@ -2284,6 +2387,11 @@
         if (d.email) contactBtns += '<a href="mailto:' + esc(d.email) + '" class="bg-slate-100 text-slate-700 border border-slate-200 px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center space-x-1"><span>✉️ ' + esc(maskEmail(d.email)) + '</span></a>';
         contactBtns += '</div>';
 
+        var quickActionBtns = '<div class="grid grid-cols-2 gap-1.5 pt-1">' +
+          '<button type="button" data-name="' + esc(d.name) + '" data-phone="' + esc(cleanP) + '" onclick="sendHelpRequestToDonor(this.getAttribute(\'data-name\'), this.getAttribute(\'data-phone\'))" class="bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 py-2 px-2.5 rounded-xl text-[11px] font-extrabold flex items-center justify-center space-x-1 active:scale-95 transition-all"><span>🤲 Yardım Talebinde Bulun</span></button>' +
+          '<button type="button" data-name="' + esc(d.name) + '" onclick="startDonationFromDonor(this.getAttribute(\'data-name\'))" class="bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 py-2 px-2.5 rounded-xl text-[11px] font-extrabold flex items-center justify-center space-x-1 active:scale-95 transition-all"><span>➕ Emanet / Bağış Gir</span></button>' +
+        '</div>';
+
         return '<div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2.5 hover:border-emerald-300 transition-all">' +
           '<div class="flex justify-between items-start">' +
             '<div>' +
@@ -2303,6 +2411,7 @@
             '<span>📋 ' + stats.count + ' Bağış / Teberru Kaydı</span>' +
             '<button type="button" data-name="' + esc(d.name) + '" onclick="openDonorDetails(this.getAttribute(\'data-name\'))" class="font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1.5 rounded-xl border border-emerald-200 active:scale-95 transition-all">📖 Hayır Defteri (İşlemleri Gör) →</button>' +
           '</div>' +
+          quickActionBtns +
           contactBtns +
           (d.notes ? '<p class="text-xs text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-100 italic">"' + maskNotes(d.notes) + '"</p>' : '') +
           (adminBtns ? '<div class="pt-1 flex justify-end">' + adminBtns + '</div>' : '') +
@@ -2905,8 +3014,9 @@
                       var rLabel = isGelir ? '📥 Teslim Alan (Kasa): ' : '📥 Yardımı Alan (İhtiyaç Sahibi): ';
                       var gClass = isGelir ? 'bg-emerald-50 text-emerald-900 border border-emerald-200' : 'bg-amber-50 text-amber-900 border border-amber-200';
                       var rClass = isGelir ? 'bg-blue-50 text-blue-900 border border-blue-200' : 'bg-rose-50 text-rose-900 border border-rose-200';
+                      var gAction = isGelir ? ' data-donor="' + esc(b.giver) + '" onclick="openDonorFromKasa(this.getAttribute(\'data-donor\'))" title="Hayırseverin Hayır Defterini Aç"' : '';
                       return '<div class="flex flex-wrap gap-x-2 gap-y-1 mt-1.5 pt-1.5 border-t border-slate-100 text-[10px] font-bold text-slate-600">' +
-                        (b.giver ? '<span class="' + gClass + ' px-1.5 py-0.5 rounded-md">' + gLabel + maskBlurText(b.giver) + '</span>' : '') +
+                        (b.giver ? '<span' + gAction + ' class="' + gClass + ' px-1.5 py-0.5 rounded-md ' + (isGelir ? 'cursor-pointer hover:opacity-80 active:scale-95 transition-all' : '') + '">' + gLabel + maskBlurText(b.giver) + (isGelir ? ' ↗' : '') + '</span>' : '') +
                         (b.receiver ? '<span class="' + rClass + ' px-1.5 py-0.5 rounded-md">' + rLabel + maskBlurText(b.receiver) + '</span>' : '') +
                       '</div>';
                     })() : '') +
@@ -3000,28 +3110,79 @@
                   '</div>' +
                   '<div><label class="text-xs font-bold text-slate-500 uppercase block mb-1">Tutar (₺)</label><input id="txAmountInput" type="number" required placeholder="Örn: 2500" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-600" /></div>' +
                   '<div><label class="text-xs font-bold text-slate-500 uppercase block mb-1">Açıklama ve Detay</label><input id="txDescInput" type="text" required placeholder="' + (state.txType === 'gelir' ? 'Örn: Zekât Teberruu (Bağışı)' : 'Örn: 5 Çuval Un, Kömür ve Erzak Alımı') + '" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-semibold outline-none focus:ring-2 focus:ring-emerald-600" /></div>' +
-                  '<div class="grid grid-cols-2 gap-2">' +
-                    '<div>' +
-                      '<label class="text-[11px] font-bold ' + (state.txType === 'gelir' ? 'text-emerald-800' : 'text-amber-800') + ' uppercase block mb-1">' + (state.txType === 'gelir' ? 'Teberruyu (Bağışı) Veren' : 'Emaneti Veren (Sorumlu)') + '</label>' +
-                      (state.txType === 'gelir'
-                        ? '<input id="txGiverInput" type="text" placeholder="Örn: Hacı Mehmet Bey / Hayırsever" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:ring-2 focus:ring-emerald-600 focus:bg-white" />'
-                        : '<select id="txGiverSelect" onchange="document.getElementById(\'txGiverInput\').value = this.value;" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none">' +
+                  (state.txType === 'gelir'
+                    ? (function() {
+                        var preDonor = (state.preselectedDonorForTx || '').trim();
+                        var matchedDonor = preDonor ? (state.donors || []).find(function(d) { return d && String(d.name || '').trim().toLowerCase() === preDonor.toLowerCase(); }) : null;
+                        var donorOptionsHTML = '<option value="">➕ Yeni Hayırsever Kaydı / Elle Girin...</option>' +
+                          (state.donors || []).filter(function(d) { return d && !isSystemCarrierRow(d); }).map(function(d) {
+                            var isSel = matchedDonor && String(d.id) === String(matchedDonor.id);
+                            return '<option value="' + esc(d.id) + '" ' + (isSel ? 'selected' : '') + '>🤝 ' + esc(d.name) + (d.city ? ' (' + esc(d.city) + ')' : '') + '</option>';
+                          }).join('');
+                        return '<div class="bg-emerald-50/70 p-3.5 rounded-2xl border border-emerald-200 space-y-2.5">' +
+                          '<div class="flex items-center justify-between">' +
+                            '<span class="text-[11px] font-extrabold text-emerald-900 uppercase font-display">🤝 Hayırsever (Bağışçı) Bilgileri & Entegre Kayıt</span>' +
+                            '<span class="text-[9px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-300">Hayırsever Sekmesine Otomatik İşlenir</span>' +
+                          '</div>' +
+                          '<div>' +
+                            '<label class="text-[10px] font-bold text-emerald-800 uppercase block mb-1">Kayıtlı Hayırsever Seç veya Yeni Ekle</label>' +
+                            '<select id="txDonorSelect" onchange="onTxDonorSelectChange(this.value)" class="w-full bg-white border border-emerald-200 rounded-xl p-2.5 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-emerald-600">' +
+                              donorOptionsHTML +
+                            '</select>' +
+                          '</div>' +
+                          '<div class="grid grid-cols-2 gap-2">' +
+                            '<div>' +
+                              '<label class="text-[10px] font-bold text-emerald-900 uppercase block mb-1">Hayırsever Adı Soyadı *</label>' +
+                              '<input id="txGiverInput" type="text" required value="' + esc(matchedDonor ? matchedDonor.name : preDonor) + '" placeholder="Örn: Hacı Mehmet Bey" class="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:ring-2 focus:ring-emerald-600" />' +
+                            '</div>' +
+                            '<div>' +
+                              '<label class="text-[10px] font-bold text-blue-900 uppercase block mb-1">Teslim Alan (Kasa Sorumlusu)</label>' +
+                              '<select id="txReceiverSelect" onchange="document.getElementById(\'txReceiverInput\').value = this.value;" class="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none">' +
+                                '<option value="">Sorumlu Seçiniz...</option>' +
+                                state.members.filter(function(m){ return m.active; }).map(function(m){ return '<option value="' + esc(m.name) + '" ' + (m.name === currentUserName ? 'selected' : '') + '>' + esc(m.name) + '</option>'; }).join('') +
+                              '</select><input id="txReceiverInput" type="hidden" value="' + esc(currentUserName) + '" />' +
+                            '</div>' +
+                          '</div>' +
+                          '<div class="grid grid-cols-2 gap-2">' +
+                            '<div>' +
+                              '<label class="text-[10px] font-bold text-slate-600 uppercase block mb-1">Telefon Numarası</label>' +
+                              '<input id="txDonorPhone" type="tel" value="' + esc(matchedDonor ? (matchedDonor.phone || '') : '') + '" placeholder="05XXXXXXXXX" class="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:ring-2 focus:ring-emerald-600" />' +
+                            '</div>' +
+                            '<div>' +
+                              '<label class="text-[10px] font-bold text-slate-600 uppercase block mb-1">Şehir / Bölge</label>' +
+                              '<input id="txDonorCity" type="text" value="' + esc(matchedDonor ? (matchedDonor.city || '') : (st.defaultCity || 'Kayseri')) + '" placeholder="Örn: Kayseri, İstanbul" class="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:ring-2 focus:ring-emerald-600" />' +
+                            '</div>' +
+                          '</div>' +
+                          '<div class="grid grid-cols-2 gap-2">' +
+                            '<div>' +
+                              '<label class="text-[10px] font-bold text-slate-600 uppercase block mb-1">E-posta (İsteğe Bağlı)</label>' +
+                              '<input id="txDonorEmail" type="email" value="' + esc(matchedDonor ? (matchedDonor.email || '') : '') + '" placeholder="ornek@mail.com" class="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:ring-2 focus:ring-emerald-600" />' +
+                            '</div>' +
+                            '<div>' +
+                              '<label class="text-[10px] font-bold text-slate-600 uppercase block mb-1">Hayırsever Destek Notu</label>' +
+                              '<input id="txDonorNotes" type="text" value="' + esc(matchedDonor ? (matchedDonor.notes || '') : '') + '" placeholder="Örn: Ramazan zekâtı, kışlık odun..." class="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:ring-2 focus:ring-emerald-600" />' +
+                            '</div>' +
+                          '</div>' +
+                        '</div>';
+                      })()
+                    : '<div class="grid grid-cols-2 gap-2">' +
+                        '<div>' +
+                          '<label class="text-[11px] font-bold text-amber-800 uppercase block mb-1">Emaneti Veren (Sorumlu)</label>' +
+                          '<select id="txGiverSelect" onchange="document.getElementById(\'txGiverInput\').value = this.value;" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none">' +
                             '<option value="">Sorumlu Seçiniz...</option>' +
                             state.members.filter(function(m){ return m.active; }).map(function(m){ return '<option value="' + esc(m.name) + '" ' + (m.name === currentUserName ? 'selected' : '') + '>' + esc(m.name) + '</option>'; }).join('') +
-                          '</select><input id="txGiverInput" type="hidden" value="' + esc(currentUserName) + '" />'
-                      ) +
-                    '</div>' +
-                    '<div>' +
-                      '<label class="text-[11px] font-bold ' + (state.txType === 'gelir' ? 'text-blue-800' : 'text-rose-800') + ' uppercase block mb-1">' + (state.txType === 'gelir' ? 'Teslim Alan (Kasa Sorumlusu)' : 'Yardımı Alan (İhtiyaç Sahibi)') + '</label>' +
-                      (state.txType === 'gelir'
-                        ? '<select id="txReceiverSelect" onchange="document.getElementById(\'txReceiverInput\').value = this.value;" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none">' +
-                            '<option value="">Sorumlu Seçiniz...</option>' +
-                            state.members.filter(function(m){ return m.active; }).map(function(m){ return '<option value="' + esc(m.name) + '" ' + (m.name === currentUserName ? 'selected' : '') + '>' + esc(m.name) + '</option>'; }).join('') +
-                          '</select><input id="txReceiverInput" type="hidden" value="' + esc(currentUserName) + '" />'
-                        : '<input id="txReceiverInput" type="text" placeholder="Örn: Ahmet Amca / Fırın / Eczane" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:ring-2 focus:ring-emerald-600 focus:bg-white" />'
-                      ) +
-                    '</div>' +
-                  '</div>' +
+                          '</select><input id="txGiverInput" type="hidden" value="' + esc(currentUserName) + '" />' +
+                        '</div>' +
+                        '<div>' +
+                          '<label class="text-[11px] font-bold text-rose-800 uppercase block mb-1">Yardımı Alan (Hane / Yer)</label>' +
+                          '<select id="txAidReceiverSelect" onchange="if(this.value) document.getElementById(\'txReceiverInput\').value = this.value;" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-[11px] font-bold outline-none mb-1.5">' +
+                            '<option value="">📋 Kayıtlı Haneden Seç (İsteğe Bağlı)...</option>' +
+                            (state.aids || []).map(function(a) { return '<option value="' + esc(a.name) + '">' + esc(a.name) + ' (' + esc(a.neighborhood || a.district || '') + ')</option>'; }).join('') +
+                          '</select>' +
+                          '<input id="txReceiverInput" type="text" placeholder="Örn: Ahmet Amca / Fırın / Eczane" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:ring-2 focus:ring-emerald-600 focus:bg-white" />' +
+                        '</div>' +
+                      '</div>'
+                  ) +
                   '<button type="submit" class="w-full text-white text-xs font-extrabold py-3.5 rounded-xl font-display shadow-md transition-all ' + (state.txType === 'gelir' ? 'bg-emerald-700 hover:bg-emerald-800' : 'bg-rose-700 hover:bg-rose-800') + '">' + (state.txType === 'gelir' ? 'Teberruyu (Bağışı) Sandığa Kaydet' : 'İnfakı (Harcamayı) Kaydet') + '</button>' +
                 '</form>' +
               '</div>' +
@@ -3280,7 +3441,11 @@
               (donorObj.notes ? '<p class="text-xs text-emerald-200/90 italic bg-white/5 p-2.5 rounded-xl border border-white/10 mt-1">"' + maskNotes(donorObj.notes) + '"</p>' : '') +
             '</div>' +
 
-            // HIZLI İLETİŞİM BUTONLARI
+            // HIZLI İLETİŞİM & ENTEGRE AKSİYON BUTONLARI
+            '<div class="grid grid-cols-2 gap-2">' +
+              '<button type="button" data-name="' + esc(targetDonorName) + '" data-phone="' + esc(donorCleanP) + '" onclick="sendHelpRequestToDonor(this.getAttribute(\'data-name\'), this.getAttribute(\'data-phone\'))" class="bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 py-2.5 rounded-xl text-xs font-extrabold flex items-center justify-center space-x-1 shadow-xs active:scale-95 transition-all"><span>🤲 Yardım Talebinde Bulun</span></button>' +
+              '<button type="button" data-name="' + esc(targetDonorName) + '" onclick="startDonationFromDonor(this.getAttribute(\'data-name\'))" class="bg-emerald-700 hover:bg-emerald-800 text-white py-2.5 rounded-xl text-xs font-extrabold flex items-center justify-center space-x-1 shadow-sm active:scale-95 transition-all"><span>➕ Yeni Emanet / Bağış Gir</span></button>' +
+            '</div>' +
             (donorCleanP ? '<div class="grid grid-cols-2 gap-2">' +
               '<button type="button" data-phone="' + esc(donorCleanP) + '" onclick="callPhone(this.getAttribute(\'data-phone\'))" class="bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center space-x-1 active:scale-95 transition-all"><span>📞 Telefonla Ara</span></button>' +
               '<button type="button" data-phone="' + esc(donorCleanP) + '" onclick="openWhatsAppChat(this.getAttribute(\'data-phone\'), \'Selamün aleyküm ' + esc(targetDonorName) + ', Hâre İnsani Yardım ekibinden yazıyoruz.\')" class="bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl text-xs font-bold flex items-center justify-center space-x-1 shadow-sm active:scale-95 transition-all"><span>💬 WhatsApp Yaz</span></button>' +
@@ -3304,25 +3469,157 @@
             '<div class="space-y-2.5">' + donorMovementsHTML + '</div>' +
           '</div>';
         } else {
-          // NORMAL HAYIRSEVERLER LİSTESİ
+          // NORMAL HAYIRSEVERLER LİSTESİ (Kayıt girme Sandık ile birleştirildi; burada Hayırseverler, Yardım Talebi ve Toplu WhatsApp yer alır)
+          ensureDonorsSyncedFromBudget();
+          var visibleDonors = (state.donors || []).filter(function(d) { return d && !isSystemCarrierRow(d); });
+          var donorsWithPhone = visibleDonors.filter(function(d) { return cleanPhone(d.phone).length >= 10; });
+          var totalDonorTeberru = (state.budget || []).filter(function(b) { return b && b.type === 'gelir'; }).reduce(function(sum, b) { return sum + (Number(b.amount) || 0); }, 0);
+          var urgentAids = (state.aids || []).filter(function(a) { return a && (a.status === 'Acil İhtiyaç' || a.status === 'Planlandı' || a.status === 'Periyodik Takip'); });
+          var commTab = state.donorCommTab || 'talep';
+          var previewMsgText = buildDonorCommPreviewMessage();
+
+          var bulkRecipientsHTML = donorsWithPhone.length === 0
+            ? '<div class="bg-slate-50 p-3 rounded-xl text-center text-[11px] text-slate-400 font-semibold border border-slate-200">Telefon numarası kayıtlı hayırsever bulunamadı. Sandıktan emanet girerken telefon numarası ekleyebilirsiniz.</div>'
+            : '<div class="space-y-1.5 max-h-48 overflow-y-auto pr-1">' +
+                donorsWithPhone.map(function(d) {
+                  var dId = String(d.id);
+                  var isChecked = state.selectedDonorIdsForBulk && state.selectedDonorIdsForBulk[dId] !== false;
+                  var dCleanP = cleanPhone(d.phone);
+                  return '<div class="flex items-center justify-between bg-slate-50 hover:bg-emerald-50/60 p-2 rounded-xl border border-slate-200 text-xs">' +
+                    '<label class="flex items-center space-x-2 cursor-pointer flex-1 min-w-0 select-none">' +
+                      '<input type="checkbox" data-id="' + esc(dId) + '" onchange="toggleDonorForBulk(this.getAttribute(\'data-id\'), this.checked)" ' + (isChecked ? 'checked' : '') + ' class="accent-emerald-600 w-4 h-4 rounded shrink-0" />' +
+                      '<div class="min-w-0 truncate">' +
+                        '<span class="font-bold text-slate-800">' + esc(maskName(d.name)) + '</span>' +
+                        (d.city ? '<span class="text-[10px] text-slate-400 ml-1">(' + esc(d.city) + ')</span>' : '') +
+                      '</div>' +
+                    '</label>' +
+                    '<button type="button" data-name="' + esc(d.name) + '" data-phone="' + esc(dCleanP) + '" onclick="sendPreparedMsgToSingleDonor(this.getAttribute(\'data-name\'), this.getAttribute(\'data-phone\'))" class="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[10px] px-2.5 py-1 rounded-lg shadow-xs shrink-0 active:scale-95 transition-all">💬 Gönder →</button>' +
+                  '</div>';
+                }).join('') +
+              '</div>';
+
           html += '<div class="space-y-4">' +
-            '<div class="bg-emerald-800 text-white p-5 rounded-3xl shadow-xl">' +
-              '<span class="text-xs font-bold text-emerald-200 uppercase tracking-wider">Kayıtlı Hayırsever Kardeşlerimiz</span>' +
-              '<h2 class="text-3xl font-extrabold mt-1 font-display">' + state.donors.length + ' Kişi</h2>' +
-              '<p class="text-xs text-emerald-100 mt-1">İyilik yolunda emanet ve yardımlara omuz veren hayırsever kardeşlerimiz</p>' +
-            '</div>' +
-            '<form onsubmit="handleNewDonor(event)" class="bg-white p-5 rounded-3xl border border-slate-200 space-y-3 shadow-sm">' +
-              '<span class="text-xs font-bold text-slate-800 uppercase block font-display">Yeni Hayırsever (Bağışçı Kardeşimiz) Ekle</span>' +
-              '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Ad Soyad</label><input id="donorName" required placeholder="Örn: Hacı Mehmet Bey" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
-              '<div class="grid grid-cols-2 gap-2">' +
-                '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Telefon Numarası</label><input id="donorPhone" type="tel" placeholder="05XXXXXXXXX" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
-                '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Şehir / Bölge</label><input id="donorCity" placeholder="Örn: İstanbul" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
+            // ÜST ÖZET & SANDIK ENTEGRASYON KARTI
+            '<div class="bg-emerald-900 text-white p-5 rounded-3xl shadow-xl space-y-3">' +
+              '<div class="flex justify-between items-start">' +
+                '<div>' +
+                  '<span class="text-[10px] font-bold text-emerald-300 uppercase tracking-wider">Sandık İle Tam Entegre Hayırsever Rehberi</span>' +
+                  '<h2 class="text-3xl font-extrabold mt-0.5 font-display">' + visibleDonors.length + ' Hayırsever</h2>' +
+                  '<p class="text-[11px] text-emerald-100 mt-0.5">Sandık bölümünden girilen her teberru ve bağışçı burada otomatik listelenir.</p>' +
+                '</div>' +
+                '<div class="text-right">' +
+                  '<span class="text-[10px] font-bold text-emerald-300 uppercase block">Toplam Teberru</span>' +
+                  '<span class="text-lg font-extrabold font-display text-white ' + (state.privacyMode ? 'filter blur-sm' : '') + '">' + totalDonorTeberru.toLocaleString('tr-TR') + ' ₺</span>' +
+                '</div>' +
               '</div>' +
-              '<div><label class="text-[11px] font-bold text-slate-500 uppercase">E-posta Adresi</label><input id="donorEmail" type="email" placeholder="ornek@mail.com" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" /></div>' +
-              '<div><label class="text-[11px] font-bold text-slate-500 uppercase">Destek / Bağış Notu</label><textarea id="donorNotes" rows="2" placeholder="Örn: Her Ramazan zekât verir, kışın 2 ton odun karşılar..." class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-medium outline-none focus:bg-white"></textarea></div>' +
-              '<button type="submit" class="w-full bg-emerald-800 text-white font-extrabold text-xs py-3 rounded-xl font-display shadow-md">Hayırseveri Kaydet</button>' +
-            '</form>' +
-            '<input type="text" id="donorSearchInput" placeholder="İsim veya şehir ile hayırsever ara..." value="' + esc(state.donorSearchQuery) + '" oninput="onDonorSearchType(this.value)" class="w-full bg-white border border-slate-200 rounded-2xl px-4 py-2.5 text-xs font-medium outline-none shadow-sm" />' +
+              '<div class="pt-2 border-t border-emerald-800/80 flex items-center justify-between gap-2">' +
+                '<span class="text-[10px] text-emerald-200 font-semibold">📞 ' + donorsWithPhone.length + ' İletişim Numaralı Hayırsever</span>' +
+                '<button type="button" onclick="startDonationFromDonor(\'\')" class="bg-white text-emerald-950 hover:bg-emerald-50 font-extrabold text-[11px] px-3 py-2 rounded-xl shadow-sm active:scale-95 transition-all">➕ Sandıktan Teberru / Hayırsever Gir →</button>' +
+              '</div>' +
+            '</div>' +
+
+            // 💬 HAYIRSEVER İLETİŞİM MERKEZİ: YARDIM TALEBİNDE BULUN & TOPLU WHATSAPP MESAJI AT
+            '<div class="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-3.5">' +
+              '<div class="flex items-center justify-between">' +
+                '<div>' +
+                  '<span class="text-xs font-extrabold text-slate-900 uppercase block font-display">💬 Hayırsever İletişim & Çağrı Merkezi</span>' +
+                  '<span class="text-[10px] text-slate-400 font-semibold">Hayırseverlerden yardım talebinde bulunun veya toplu WhatsApp mesajı gönderin</span>' +
+                '</div>' +
+              '</div>' +
+
+              // 2 SEKMELİ MOD SEÇİCİ
+              '<div class="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-2xl">' +
+                '<button type="button" onclick="setDonorCommTab(\'talep\')" class="py-2.5 rounded-xl text-xs font-extrabold transition-all ' + (commTab === 'talep' ? 'bg-amber-600 text-white shadow-md' : 'text-slate-600 hover:bg-white/60') + '">🤲 Yardım Talebinde Bulun</button>' +
+                '<button type="button" onclick="setDonorCommTab(\'toplu\')" class="py-2.5 rounded-xl text-xs font-extrabold transition-all ' + (commTab === 'toplu' ? 'bg-emerald-700 text-white shadow-md' : 'text-slate-600 hover:bg-white/60') + '">📢 Toplu WhatsApp Mesajı</button>' +
+              '</div>' +
+
+              (commTab === 'talep'
+                ? '<div class="space-y-3">' +
+                    '<div class="bg-amber-50/80 border border-amber-200 p-3 rounded-2xl text-[11px] text-amber-950 font-medium leading-snug">' +
+                      '🤲 <strong>Acil İhtiyaç / Yardım Talebi Oluşturucu:</strong> İhtiyaç sahibi hanenin mahremiyetini koruyarak (soyisim ve telefon paylaşmadan) hayırsever kardeşlerimize resmi yardım çağrısı hazırlayın.' +
+                    '</div>' +
+                    '<div>' +
+                      '<label class="text-[10px] font-bold text-slate-500 uppercase block mb-1">1. Hane Seçin (Müstacel / Planlanan Haneler veya Genel)</label>' +
+                      '<select id="donorReqAidSelect" onchange="onDonorRequestAidChange(this.value)" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:ring-2 focus:ring-amber-500">' +
+                        '<option value="">🏠 Genel Saha İhtiyacı (Belirli Hane Seçmeden)</option>' +
+                        urgentAids.map(function(a) {
+                          var isSel = String(state.selectedAidForRequest) === String(a.id);
+                          var stIcon = a.status === 'Acil İhtiyaç' ? '🚨' : (a.status === 'Planlandı' ? '⏳' : '🔄');
+                          return '<option value="' + esc(a.id) + '" ' + (isSel ? 'selected' : '') + '>' + stIcon + ' ' + esc(maskName(a.name)) + ' — ' + esc(a.neighborhood || a.district || '') + ' (' + esc((a.category || []).join(', ') || 'İhtiyaç') + ')</option>';
+                        }).join('') +
+                      '</select>' +
+                    '</div>' +
+                    '<div class="grid grid-cols-2 gap-2">' +
+                      '<div>' +
+                        '<label class="text-[10px] font-bold text-slate-500 uppercase block mb-1">2. Talep Edilen Yardım Türü</label>' +
+                        '<select id="donorReqCatSelect" onchange="onDonorRequestFieldChange()" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none">' +
+                          '<option value="Acil Nakit / Erzak Desteği" ' + (state.donorRequestNeedCategory === 'Acil Nakit / Erzak Desteği' ? 'selected' : '') + '>🥖 Acil Nakit / Erzak</option>' +
+                          '<option value="Kira / Fatura Desteği" ' + (state.donorRequestNeedCategory === 'Kira / Fatura Desteği' ? 'selected' : '') + '>🏠 Kira / Fatura Desteği</option>' +
+                          '<option value="Kışlık Yakacak (Odun / Kömür)" ' + (state.donorRequestNeedCategory === 'Kışlık Yakacak (Odun / Kömür)' ? 'selected' : '') + '>🔥 Kışlık Yakacak</option>' +
+                          '<option value="Ev Eşyası / Beyaz Eşya" ' + (state.donorRequestNeedCategory === 'Ev Eşyası / Beyaz Eşya' ? 'selected' : '') + '>🛋️ Ev / Beyaz Eşya</option>' +
+                          '<option value="Sağlık / İlaç / Tedavi" ' + (state.donorRequestNeedCategory === 'Sağlık / İlaç / Tedavi' ? 'selected' : '') + '>💊 Sağlık / İlaç</option>' +
+                          '<option value="Yetim / Eğitim Burs Desteği" ' + (state.donorRequestNeedCategory === 'Yetim / Eğitim Burs Desteği' ? 'selected' : '') + '>👶 Yetim / Eğitim</option>' +
+                          '<option value="Zekât / Sadaka Emaneti" ' + (state.donorRequestNeedCategory === 'Zekât / Sadaka Emaneti' ? 'selected' : '') + '>🌿 Zekât / Sadaka</option>' +
+                        '</select>' +
+                      '</div>' +
+                      '<div>' +
+                        '<label class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Hedef Tutar / Miktar (İsteğe Bağlı)</label>' +
+                        '<input id="donorReqAmountInput" type="text" value="' + esc(state.donorRequestAmount || '') + '" oninput="onDonorRequestFieldChange()" placeholder="Örn: 3.500 ₺ veya 2 Koli" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:bg-white" />' +
+                      '</div>' +
+                    '</div>' +
+                    '<div>' +
+                      '<label class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Ek Açıklama / Özel Çağrı Notu (İsteğe Bağlı)</label>' +
+                      '<input id="donorReqNoteInput" type="text" value="' + esc(state.donorRequestCustomNote || '') + '" oninput="onDonorRequestFieldChange()" placeholder="Örn: 3 yetim evladımız var, bu hafta kira ödemesi yapılacak..." class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white" />' +
+                    '</div>' +
+                  '</div>'
+                : '<div class="space-y-3">' +
+                    '<div class="bg-emerald-50/80 border border-emerald-200 p-3 rounded-2xl text-[11px] text-emerald-950 font-medium leading-snug">' +
+                      '📢 <strong>Toplu WhatsApp Mesaj & Duyuru Motoru:</strong> Hazır şablon seçin veya kendi mesajınızı yazın; tek dokunuşla WhatsApp gruplarında paylaşın ya da listedeki hayırseverlere isme özel (`Muhterem [İsim]`) sırayla gönderin.' +
+                    '</div>' +
+                    '<div>' +
+                      '<label class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Mesaj Şablonu Seçin</label>' +
+                      '<select id="donorBulkTemplateSelect" onchange="setDonorBulkTemplate(this.value)" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold outline-none focus:ring-2 focus:ring-emerald-600">' +
+                        '<option value="acil_cagri" ' + (state.donorBulkTemplate === 'acil_cagri' ? 'selected' : '') + '>🚨 Acil Yardım & İnfak Çağrısı</option>' +
+                        '<option value="cuma_dua" ' + (state.donorBulkTemplate === 'cuma_dua' ? 'selected' : '') + '>🌿 Cuma / Kandil Tebriği & Hayır Duası</option>' +
+                        '<option value="tesekkur_rapor" ' + (state.donorBulkTemplate === 'tesekkur_rapor' ? 'selected' : '') + '>📊 Saha Emanet & Faaliyet Teşekkür Mesajı</option>' +
+                        '<option value="iban_paylasim" ' + (state.donorBulkTemplate === 'iban_paylasim' ? 'selected' : '') + '>🏦 Resmi Emanet Hesabı (IBAN) Bilgilendirmesi</option>' +
+                        '<option value="ozel" ' + (state.donorBulkTemplate === 'ozel' ? 'selected' : '') + '>✍️ Özel Mesaj Metni Yaz</option>' +
+                      '</select>' +
+                    '</div>' +
+                  '</div>'
+              ) +
+
+              // MESAJ ÖNİZLEME VE DÜZENLEME KUTUSU
+              '<div>' +
+                '<div class="flex justify-between items-center mb-1">' +
+                  '<label class="text-[10px] font-bold text-slate-500 uppercase">Hazırlanan WhatsApp Mesajı (Düzenleyebilirsiniz)</label>' +
+                  '<button type="button" onclick="copyPreparedDonorMessage()" class="text-[10px] font-bold text-emerald-800 hover:underline">📋 Metni Kopyala</button>' +
+                '</div>' +
+                '<textarea id="donorCommMessageTextarea" rows="5" oninput="state.donorBulkCustomText = this.value" class="w-full bg-slate-50 border border-slate-200 rounded-2xl p-3 text-xs font-medium text-slate-800 outline-none focus:ring-2 focus:ring-emerald-600 focus:bg-white leading-relaxed">' + esc(previewMsgText) + '</textarea>' +
+              '</div>' +
+
+              // ANA GÖNDERİM BUTONLARI
+              '<div class="grid grid-cols-2 gap-2">' +
+                '<button type="button" onclick="sharePreparedDonorMessageGeneral()" class="bg-emerald-700 hover:bg-emerald-800 text-white font-extrabold text-xs py-3 px-3 rounded-xl shadow-md flex items-center justify-center space-x-1.5 active:scale-95 transition-all">' +
+                  '<span>📲 WhatsApp Grup / Kişi Seç</span>' +
+                '</button>' +
+                '<button type="button" onclick="copyAllDonorPhones()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 font-extrabold text-xs py-3 px-3 rounded-xl flex items-center justify-center space-x-1.5 active:scale-95 transition-all">' +
+                  '<span>📋 Numaraları Kopyala (' + donorsWithPhone.length + ')</span>' +
+                '</button>' +
+              '</div>' +
+
+              // KAYITLI HAYIRSEVERLERE TEK TEK / TOPLU HIZLI GÖNDERİM LİSTESİ
+              '<div class="pt-2 border-t border-slate-100 space-y-2">' +
+                '<div class="flex items-center justify-between">' +
+                  '<span class="text-[10px] font-extrabold text-slate-600 uppercase">👥 Hayırseverlere İsme Özel Gönderim Listesi (' + donorsWithPhone.length + ' Kişi)</span>' +
+                  '<button type="button" onclick="toggleAllDonorsForBulk()" class="text-[10px] font-bold text-emerald-800 hover:underline">Tümünü Seç/Bırak</button>' +
+                '</div>' +
+                bulkRecipientsHTML +
+              '</div>' +
+            '</div>' +
+
+            // ARAMA VE HAYIRSEVER KARTLARI LİSTESİ
+            '<input type="text" id="donorSearchInput" placeholder="İsim, şehir, telefon veya not ile hayırsever ara..." value="' + esc(state.donorSearchQuery) + '" oninput="onDonorSearchType(this.value)" class="w-full bg-white border border-slate-200 rounded-2xl px-4 py-2.5 text-xs font-medium outline-none shadow-sm" />' +
             '<div id="donorsListContainer" class="space-y-3">' + renderDonorsListHTML() + '</div>' +
           '</div>';
         }
@@ -4666,11 +4963,14 @@
         var erEl = document.getElementById('editBudgetReceiver');
         item.giver = egEl ? egEl.value.trim() : '';
         item.receiver = erEl ? erEl.value.trim() : '';
+        if (item.type === 'gelir' && item.giver) {
+          upsertDonorFromBudget(item.giver, item.donorPhone || '', item.donorCity || '', item.donorEmail || '', item.donorNotes || '');
+        }
         markIdDirty(item.id);
         pushToGoogleSheet('Kasa Güncellendi', item.desc + ' (' + item.amount + ' TL) güncellendi.');
         state.editingBudgetId = null;
         render();
-        showToast('Kasa hareketi güncellendi!');
+        showToast('Kasa hareketi ve hayırsever bağlantısı güncellendi!');
       }
     };
 
@@ -4710,16 +5010,31 @@
       var targetId = String(state.editingDonorId || '').trim();
       var item = state.donors.find(function(d) { return String(d.id).trim() === targetId; });
       if (item) {
-        item.name = document.getElementById('editDonorName').value;
-        item.phone = document.getElementById('editDonorPhone').value;
-        item.city = document.getElementById('editDonorCity').value;
-        item.email = document.getElementById('editDonorEmail').value;
-        item.notes = document.getElementById('editDonorNotes').value;
+        var oldNameLower = String(item.name || '').trim().toLowerCase();
+        var newName = document.getElementById('editDonorName').value.trim();
+        item.name = newName;
+        item.phone = document.getElementById('editDonorPhone').value.trim();
+        item.city = document.getElementById('editDonorCity').value.trim();
+        item.email = document.getElementById('editDonorEmail').value.trim();
+        item.notes = document.getElementById('editDonorNotes').value.trim();
+        // Sandık (Kasa) kayıtlarındaki eşleşen bağışçı ismini ve meta verilerini de senkronize et
+        if (oldNameLower && Array.isArray(state.budget)) {
+          state.budget.forEach(function(b) {
+            if (b && b.type === 'gelir' && String(b.giver || '').trim().toLowerCase() === oldNameLower) {
+              b.giver = newName;
+              b.donorPhone = item.phone;
+              b.donorCity = item.city;
+              b.donorEmail = item.email;
+              b.donorNotes = item.notes;
+              markIdDirty(b.id);
+            }
+          });
+        }
         markIdDirty(item.id);
         pushToGoogleSheet('Bağışçı Güncellendi', item.name + ' bilgileri güncellendi.');
         state.editingDonorId = null;
         render();
-        showToast('Hayırsever bilgisi güncellendi!');
+        showToast('Hayırsever bilgisi ve Sandık bağlantısı güncellendi!');
       }
     };
 
@@ -4999,8 +5314,294 @@
       }
     };
 
+    // 🔗 SANDIK <-> HAYIRSEVER ENTEGRASYON VE WHATSAPP YARDIM TALEBİ / TOPLU MESAJ FONKSİYONLARI
+    window.onTxDonorSelectChange = function(donorId) {
+      var gEl = document.getElementById('txGiverInput');
+      var pEl = document.getElementById('txDonorPhone');
+      var cEl = document.getElementById('txDonorCity');
+      var eEl = document.getElementById('txDonorEmail');
+      var nEl = document.getElementById('txDonorNotes');
+      if (!donorId) {
+        state.preselectedDonorForTx = '';
+        if (gEl) { gEl.value = ''; gEl.focus(); }
+        if (pEl) pEl.value = '';
+        if (cEl) cEl.value = (state.settings && state.settings.defaultCity) || 'Kayseri';
+        if (eEl) eEl.value = '';
+        if (nEl) nEl.value = '';
+        return;
+      }
+      var d = (state.donors || []).find(function(x) { return x && String(x.id).trim() === String(donorId).trim(); });
+      if (d) {
+        state.preselectedDonorForTx = d.name || '';
+        if (gEl) gEl.value = d.name || '';
+        if (pEl) pEl.value = d.phone || '';
+        if (cEl) cEl.value = d.city || ((state.settings && state.settings.defaultCity) || 'Kayseri');
+        if (eEl) eEl.value = d.email || '';
+        if (nEl) nEl.value = d.notes || '';
+      }
+    };
+
+    window.startDonationFromDonor = function(donorName) {
+      pushNavState('kasaFromDonor');
+      state.activeTab = 'kasa';
+      state.kasaSubTab = 'genel';
+      state.viewingMemberKasa = null;
+      state.viewingDonorDetails = null;
+      state.txType = 'gelir';
+      state.preselectedDonorForTx = donorName || '';
+      saveNavState();
+      render();
+      setTimeout(function() {
+        var amtEl = document.getElementById('txAmountInput');
+        var gEl = document.getElementById('txGiverInput');
+        if (donorName && amtEl) amtEl.focus();
+        else if (gEl) gEl.focus();
+      }, 60);
+    };
+
+    window.openDonorFromKasa = function(donorName) {
+      if (!donorName) return;
+      ensureDonorsSyncedFromBudget();
+      pushNavState('donorDetails:' + donorName);
+      state.activeTab = 'bagiscilar';
+      state.viewingDonorDetails = donorName;
+      state.donorDetailsFilter = 'tumu';
+      saveNavState();
+      render();
+    };
+
+    window.setDonorCommTab = function(tabName) {
+      state.donorCommTab = tabName || 'talep';
+      state.donorBulkCustomText = '';
+      render();
+    };
+
+    window.onDonorRequestAidChange = function(aidId) {
+      state.selectedAidForRequest = aidId || '';
+      if (aidId) {
+        var aidObj = (state.aids || []).find(function(a) { return a && String(a.id) === String(aidId); });
+        if (aidObj && Array.isArray(aidObj.category) && aidObj.category.length > 0) {
+          state.donorRequestNeedCategory = aidObj.category.join(', ');
+        }
+      }
+      state.donorBulkCustomText = '';
+      render();
+    };
+
+    window.onDonorRequestFieldChange = function() {
+      var catEl = document.getElementById('donorReqCatSelect');
+      var amtEl = document.getElementById('donorReqAmountInput');
+      var noteEl = document.getElementById('donorReqNoteInput');
+      if (catEl) state.donorRequestNeedCategory = catEl.value;
+      if (amtEl) state.donorRequestAmount = amtEl.value;
+      if (noteEl) state.donorRequestCustomNote = noteEl.value;
+      state.donorBulkCustomText = '';
+      var ta = document.getElementById('donorCommMessageTextarea');
+      if (ta) ta.value = buildDonorCommPreviewMessage();
+    };
+
+    window.setDonorBulkTemplate = function(tpl) {
+      state.donorBulkTemplate = tpl || 'acil_cagri';
+      state.donorBulkCustomText = '';
+      render();
+    };
+
+    function buildDonorCommPreviewMessage(recipientName) {
+      if (state.donorBulkCustomText && String(state.donorBulkCustomText).trim() !== '') {
+        var customBase = String(state.donorBulkCustomText);
+        if (recipientName) {
+          return customBase.replace(/Hayırsever Kardeşimiz/g, recipientName).replace(/\[İsim\]/g, recipientName);
+        }
+        return customBase;
+      }
+      var st = state.settings || DEFAULT_SETTINGS;
+      var greeting = recipientName ? ('Muhterem *' + recipientName + '*') : 'Muhterem *Hayırsever Kardeşimiz*';
+      var ibanBlock = st.orgIban
+        ? ('\n\n🏦 *Resmi Emanet Hesabımız:*\n' + (st.orgIbanHolder ? '👤 *Alıcı:* ' + st.orgIbanHolder + '\n' : '') + '💳 *IBAN:* `' + st.orgIban + '`')
+        : '';
+      var footer = '\n\n' + (st.shareCardFooter || '_Hâre İnsani Yardım Halkası_');
+
+      if ((state.donorCommTab || 'talep') === 'talep') {
+        var aidObj = state.selectedAidForRequest
+          ? (state.aids || []).find(function(a) { return a && String(a.id) === String(state.selectedAidForRequest); })
+          : null;
+        var locText = aidObj
+          ? ((aidObj.neighborhood ? aidObj.neighborhood + ' Mah. - ' : '') + (aidObj.district || '') + (aidObj.city ? ' / ' + aidObj.city : ''))
+          : ((st.defaultCity || 'Kayseri') + ' Sahası');
+        var needCat = state.donorRequestNeedCategory || (aidObj && Array.isArray(aidObj.category) && aidObj.category.length > 0 ? aidObj.category.join(', ') : 'Acil Nakit / Erzak Desteği');
+        var amtText = state.donorRequestAmount ? ('\n💰 *Hedeflenen Destek / Miktar:* ' + state.donorRequestAmount) : '';
+        var noteText = state.donorRequestCustomNote
+          ? ('\n📝 *Durum Detayı:* ' + state.donorRequestCustomNote)
+          : (aidObj && aidObj.notes ? ('\n📝 *Tespit Notu:* ' + aidObj.notes) : '');
+
+        return (st.receiptHeader || '🌿 *HÂRE İNSANİ YARDIM HALKASI*') + '\n' +
+          '_“Kim bir müminin dünya sıkıntılarından birini giderirse, Allah da onun kıyamet günü sıkıntılarından birini giderir.” (Müslim, Birr, 36)_\n\n' +
+          'Selamün aleyküm ' + greeting + ',\n\n' +
+          'Sahada bizzat tespit ettiğimiz ihtiyaç sahibi bir ailemiz için hayır ve desteklerinizi bekliyoruz:\n\n' +
+          '📍 *Bölge:* ' + locText + '\n' +
+          '📦 *Acil İhtiyaç Kalemi:* ' + needCat +
+          amtText +
+          noteText +
+          ibanBlock + '\n\n' +
+          '🤲 Destek olmak veya detaylı bilgi almak için bu mesajı yanıtlayabilirsiniz. Rabbimiz hayırlarınızı kabul eylesin.' +
+          footer;
+      }
+
+      var tpl = state.donorBulkTemplate || 'acil_cagri';
+      if (tpl === 'cuma_dua') {
+        return (st.receiptHeader || '🌿 *HÂRE İNSANİ YARDIM HALKASI*') + '\n\n' +
+          'Selamün aleyküm ' + greeting + ',\n\n' +
+          '🌹 Cumanız ve gününüz mübarek olsun. Sizlerin emanetleriyle ihtiyaç sahibi yetim ve mazlum hanelerin yüzünü güldürmeye devam ediyoruz.\n\n' +
+          'Rabbimiz kazancınıza bereket, hanenize huzur ve afiyet ihsan eylesin.' +
+          footer;
+      }
+      if (tpl === 'tesekkur_rapor') {
+        var totalHane = (state.aids || []).length;
+        var deliveredHane = (state.aids || []).filter(function(a) { return a && a.status === 'Teslim Edildi'; }).length;
+        var urgentCount = (state.aids || []).filter(function(a) { return a && a.status === 'Acil İhtiyaç'; }).length;
+        return (st.receiptHeader || '🌿 *HÂRE İNSANİ YARDIM HALKASI*') + '\n\n' +
+          'Selamün aleyküm ' + greeting + ',\n\n' +
+          '📊 *Saha Emanet Bilgilendirmesi:*\n' +
+          'Siz kıymetli hayırseverlerimizin destekleriyle bugüne kadar *' + totalHane + '* ihtiyaç sahibi hanemiz kayıt altına alınmış, *' + deliveredHane + '* haneye emanetler bizzat ulaştırılmıştır. Şu an sırada bekleyen *' + urgentCount + '* müstacel (acil) hanemiz bulunmaktadır.' +
+          ibanBlock + '\n\n' +
+          'İyilik halkamıza verdiğiniz kıymetli destekler için gönülden teşekkür ederiz.' +
+          footer;
+      }
+      if (tpl === 'iban_paylasim') {
+        return (st.receiptHeader || '🌿 *HÂRE İNSANİ YARDIM HALKASI*') + '\n\n' +
+          'Selamün aleyküm ' + greeting + ',\n\n' +
+          'Zekât, sadaka ve infak emanetleriniz için resmi emanet hesap bilgilerimiz aşağıdadır:' +
+          (ibanBlock || '\n\n🏦 *(Yönetici panelinden IBAN bilgisi tanımlanabilir)*') + '\n\n' +
+          'Açıklama kısmına emanet türünü (Zekât / Sadaka / Erzak) yazabilirsiniz. Allah hayrınızı kabul eylesin.' +
+          footer;
+      }
+      if (tpl === 'ozel') {
+        return 'Selamün aleyküm ' + greeting + ',\n\n' +
+          'Hâre İnsani Yardım Halkası olarak hayırlı günler dileriz.' +
+          footer;
+      }
+      // Varsayılan: acil_cagri
+      var mustacelSayi = (state.aids || []).filter(function(a) { return a && a.status === 'Acil İhtiyaç'; }).length;
+      return (st.receiptHeader || '🌿 *HÂRE İNSANİ YARDIM HALKASI*') + '\n' +
+        '_' + (st.orgMotto || '“İyilik ve takvâda yardımlaşın...” (Mâide, 2)') + '_\n\n' +
+        'Selamün aleyküm ' + greeting + ',\n\n' +
+        '🚨 Sahada tespit ettiğimiz *' + (mustacelSayi > 0 ? mustacelSayi + ' acil (müstacel) ihtiyaç sahibi ailemiz' : 'ihtiyaç sahibi yetim ve mazlum ailelerimiz') + '* için gıda, kira ve yakacak desteklerinizi bekliyoruz.' +
+        ibanBlock + '\n\n' +
+        '🤲 Az çok demeden yapacağınız her katkı bir haneye umut olacaktır. Rabbimiz infaklarınızı dergâh-ı izzetinde kabul eylesin.' +
+        footer;
+    }
+
+    window.getPreparedDonorMessageText = function(recipientName) {
+      var ta = document.getElementById('donorCommMessageTextarea');
+      if (ta && ta.value.trim()) {
+        var raw = ta.value;
+        if (recipientName) {
+          return raw.replace(/Hayırsever Kardeşimiz/g, recipientName).replace(/\[İsim\]/g, recipientName);
+        }
+        return raw;
+      }
+      return buildDonorCommPreviewMessage(recipientName);
+    };
+
+    window.sendPreparedMsgToSingleDonor = function(donorName, donorPhone) {
+      var msg = window.getPreparedDonorMessageText(donorName);
+      var cleanP = cleanPhone(donorPhone);
+      if (cleanP) {
+        openWhatsAppChat(cleanP, msg);
+      } else {
+        var appUrl = 'whatsapp://send?text=' + encodeURIComponent(msg);
+        markExternalIntentActive();
+        pushNavState('external');
+        var a = document.createElement('a');
+        a.href = appUrl;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(function() { if (a && a.parentNode) a.parentNode.removeChild(a); }, 300);
+      }
+    };
+
+    window.sendHelpRequestToDonor = function(donorName, donorPhone) {
+      state.donorCommTab = 'talep';
+      var msg = buildDonorCommPreviewMessage(donorName);
+      var cleanP = cleanPhone(donorPhone);
+      if (cleanP) {
+        openWhatsAppChat(cleanP, msg);
+      } else {
+        var appUrl = 'whatsapp://send?text=' + encodeURIComponent(msg);
+        markExternalIntentActive();
+        pushNavState('external');
+        var a = document.createElement('a');
+        a.href = appUrl;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(function() { if (a && a.parentNode) a.parentNode.removeChild(a); }, 300);
+      }
+    };
+
+    window.sharePreparedDonorMessageGeneral = function() {
+      var msg = window.getPreparedDonorMessageText('');
+      var appUrl = 'whatsapp://send?text=' + encodeURIComponent(msg);
+      markExternalIntentActive();
+      pushNavState('external');
+      var a = document.createElement('a');
+      a.href = appUrl;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function() { if (a && a.parentNode) a.parentNode.removeChild(a); }, 300);
+    };
+
+    window.copyPreparedDonorMessage = function() {
+      var msg = window.getPreparedDonorMessageText('');
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(msg).then(function() {
+          showToast('📋 Hazırlanan WhatsApp mesaj metni panoya kopyalandı!');
+        });
+      } else {
+        showToast('📋 Mesaj metni hazır.');
+      }
+    };
+
+    window.copyAllDonorPhones = function() {
+      var phones = (state.donors || []).filter(function(d) {
+        if (!d || isSystemCarrierRow(d)) return false;
+        var p = cleanPhone(d.phone);
+        if (p.length < 10) return false;
+        return !state.selectedDonorIdsForBulk || state.selectedDonorIdsForBulk[String(d.id)] !== false;
+      }).map(function(d) {
+        return formatPhoneForDialer(d.phone);
+      });
+      if (phones.length === 0) {
+        showToast('Kopyalanacak telefon numarası bulunamadı.');
+        return;
+      }
+      var joined = phones.join(', ');
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(joined).then(function() {
+          showToast('📋 ' + phones.length + ' hayırsever telefon numarası panoya kopyalandı!');
+        });
+      } else {
+        showToast('📋 ' + phones.length + ' numara: ' + joined);
+      }
+    };
+
+    window.toggleDonorForBulk = function(donorId, checked) {
+      if (!state.selectedDonorIdsForBulk) state.selectedDonorIdsForBulk = {};
+      state.selectedDonorIdsForBulk[String(donorId)] = Boolean(checked);
+    };
+
+    window.toggleAllDonorsForBulk = function() {
+      if (!state.selectedDonorIdsForBulk) state.selectedDonorIdsForBulk = {};
+      var visible = (state.donors || []).filter(function(d) { return d && !isSystemCarrierRow(d) && cleanPhone(d.phone).length >= 10; });
+      var allSelected = visible.every(function(d) { return state.selectedDonorIdsForBulk[String(d.id)] !== false; });
+      visible.forEach(function(d) {
+        state.selectedDonorIdsForBulk[String(d.id)] = !allSelected;
+      });
+      render();
+    };
+
     window.handleNewBudget = function(e) {
       e.preventDefault();
+      if (isWriteBlockedByMaintenance()) return;
       var amtInput = document.getElementById('txAmountInput');
       var descInput = document.getElementById('txDescInput');
       var giverInput = document.getElementById('txGiverInput');
@@ -5009,6 +5610,13 @@
       if (!amtInput || !descInput || !amtInput.value || !descInput.value) return;
 
       var catVal = catSelect ? catSelect.value : (state.txType === 'gelir' ? 'Zekât / Teberru' : 'Genel İnfak');
+      var giverVal = giverInput ? giverInput.value.trim() : '';
+      var receiverVal = receiverInput ? receiverInput.value.trim() : '';
+
+      var donorPhoneVal = (document.getElementById('txDonorPhone') || {}).value || '';
+      var donorCityVal = (document.getElementById('txDonorCity') || {}).value || '';
+      var donorEmailVal = (document.getElementById('txDonorEmail') || {}).value || '';
+      var donorNotesVal = (document.getElementById('txDonorNotes') || {}).value || '';
 
       var newItem = {
         id: 'b-' + Date.now(),
@@ -5017,33 +5625,30 @@
         category: catVal,
         amount: Number(amtInput.value),
         desc: descInput.value.trim(),
-        giver: giverInput ? giverInput.value.trim() : '',
-        receiver: receiverInput ? receiverInput.value.trim() : '',
+        giver: giverVal,
+        receiver: receiverVal,
+        donorPhone: state.txType === 'gelir' ? donorPhoneVal.trim() : '',
+        donorCity: state.txType === 'gelir' ? donorCityVal.trim() : '',
+        donorEmail: state.txType === 'gelir' ? donorEmailVal.trim() : '',
+        donorNotes: state.txType === 'gelir' ? donorNotesVal.trim() : '',
         author: state.currentUser ? state.currentUser.name : 'Sorumlu',
         date: getTurkeyDate()
       };
+
+      // Eğer Teberru (Bağış) girildiyse Hayırseverler listesine otomatik ekle veya güncelle
+      if (state.txType === 'gelir' && giverVal) {
+        upsertDonorFromBudget(giverVal, donorPhoneVal, donorCityVal, donorEmailVal, donorNotesVal);
+      }
+
+      state.preselectedDonorForTx = '';
       state.budget.unshift(newItem);
       markIdDirty(newItem.id);
       saveCacheItem('hare_cached_budget', state.budget);
       pushToGoogleSheet('Kasa Hareketi', newItem.desc + ' (' + newItem.amount + ' TL - ' + catVal + ') eklendi.');
       render();
-      showToast('✅ Kasa hareketi (' + catVal + ') kaydedildi!');
-    };
-
-    window.handleNewDonor = function(e) {
-      e.preventDefault();
-      var newDonor = {
-        id: 'd-' + Date.now(),
-        name: document.getElementById('donorName').value,
-        phone: document.getElementById('donorPhone').value,
-        city: document.getElementById('donorCity').value,
-        email: document.getElementById('donorEmail').value,
-        notes: document.getElementById('donorNotes').value
-      };
-      state.donors.unshift(newDonor);
-      markIdDirty(newDonor.id);
-      pushToGoogleSheet('Bağışçı Eklendi', newDonor.name + ' kaydedildi.');
-      render();
+      showToast(state.txType === 'gelir' && giverVal
+        ? '✅ Teberru Sandığa kaydedildi ve "' + giverVal + '" Hayırseverler listesine işlendi!'
+        : '✅ Kasa hareketi (' + catVal + ') kaydedildi!');
     };
 
     window.handleNewMember = function(e) {

@@ -509,19 +509,125 @@ Uygulamanın tamamı Node.js sanal tarayıcı (VM) ortamında uçtan uca simüle
    * **Genel Sandık Hızlı Filtre ve Arama:** Sandık geçmişine `Tümü`, `🟢 Teberru`, `🔴 İnfak`, `🏦 Banka`, `💵 Elden` filtreleri ve anlık arama kutusu eklendi.
 
    * **Kasa Düzenleme ve Excel CSV İyileştirmesi:** Kasa hareketi düzenleme penceresine (`Kasa Hareketini Düzenle`) **Kategori / Kalem** alanı ve Hane Düzenleme penceresine **Durum** alanı eklendi.
+
 ### 27. 📱 Mobil APK / Uygulama Özel İyileştirmeleri: Aşağı Çekince Yenileme (Pull-to-Refresh) Kapatılması ve Geri Tuşu (1 Geri Ana Sayfa, 2 Geri Çıkış)
 
 * **1. Aşağı Çekince Yenileme (Pull-to-Refresh) Özelliğinin Kapatılması:**
+
   * **Sorun:** Kullanıcı sayfadayken parmağıyla ekranı aşağı çektiğinde Android WebView motoru sayfayı yeniden yüklüyor, dönen yenileme çemberi çıkıyor ve uygulama sıfırlanıyordu.
+
   * **Uygulanan Kesin Çözüm:**
+
     * **CSS Düzeyi:** `html, body` etiketlerine `overscroll-behavior: none !important;` ve `overscroll-behavior-y: none !important;` eklendi.
+
     * **JavaScript Dokunma Yakalayıcısı:** Hem `window` hem `document` seviyesinde `touchstart` ve `{ passive: false }` seçenekli `touchmove` dinleyicileri devreye alındı. Sayfa tepe noktasındayken (`scrollTop <= 0 && diffY > 0`) yapılan aşağı kaydırma hareketleri `e.preventDefault()` ile iptal edildi. Sayfa aşağı veya yukarı normal olarak kaymaya devam eder ancak hiçbir zaman sayfayı baştan yenilemez.
+
     * **WebIntoApp APK Derleme Notu:** WebIntoApp kontrol panelinizde **"App Settings > Features"** menüsünde bulunan **"Swipe to Refresh / Pull to Refresh"** seçeneğini KAPALI (işaretsiz) tutarak APK derlediğinizde Android Java seviyesindeki çember yenileme de tamamen devre dışı kalır.
 
 * **2. Mobil APK Donanım Geri Tuşu Kuralı (1 Geri Ana Sayfa, 2 Geri Çıkış):**
+
   * **Sorun:** Kullanıcı başka sekmelerdeyken veya ana sayfadayken geri tuşuna bastığında Android WebView geçmişinin tükenmesi sebebiyle uygulamanın aniden kapanması.
+
   * **Uygulanan Çözüm (Kademeli Geri & Çift Tıkla Çıkış Motoru):**
+
     * **1. Aşama (Açık Pencereler):** Hane Detayı, Düzenleme Formu, Fotoğraf İnceleme, PIN Değiştirme veya Kategori Listesi açıksa; geri tuşuna basıldığında yalnızca o pencere kapanır.
+
     * **2. Aşama (Diğer Sekmelerden Ana Sayfaya Dönüş - 1 Geri):** Kullanıcı **Sandık**, **Hane Ekle (+)**, **Hayırsever** veya **Gönüllü** sekmesindeyken geri tuşuna bastığında **asla uygulamadan çıkmaz**; 1 geri basışla doğrudan **Haneler ana sayfasına** döner ve ekranda *"← Haneler ana sayfasına dönüldü."* bildirimi çıkar.
+
     * **3. Aşama (Haneler Ana Sayfasında 1. Basış):** Kullanıcı zaten Haneler ana sayfasındayken geri tuşuna ilk kez bastığında uygulama kapanmaz; ekranda *"🚪 Çıkmak için tekrar basın"* uyarısı çıkar ve 3 saniyelik güvenli çıkış süresi başlar.
+
     * **4. Aşama (Haneler Ana Sayfasında 2. Basış):** Kullanıcı gerçekten çıkmak istiyorsa ve 3 saniye içinde ikinci kez geri tuşuna basarsa, uygulama *"🚪 Hâre kapatılıyor..."* diyerek temizce kapanır. 3 saniye içinde ikinci basış gelmezse sayaç sıfırlanır, kazara kapanmalar önlenir.
+
+### 28. 🛠️ Kapsamlı Yönetici Kontrol Paneli, Gelişmiş Ekip Yetkilendirme, Log Silme ve Tam E-Tablo Senkronizasyonu (v3.2)
+
+* **1. 🛡️ Gelişmiş Ekip Yetkilendirme & 4 Kademeli Rol Sistemi (`Ekip & Yetki`):**
+  * **4 Kademeli Rol Seviyesi:**
+    * `👑 Baş Emanetçi (Tam Yönetici)`: Tüm sistem ayarları, yönetim paneli, ekip yetkilendirme ve log silme dahil tam yetki.
+    * `🛡️ Yardımcı Yönetici (Koordinatör)`: Hane, Sandık ve Hayırsever düzenleme/silme, işlem günlüğü görüntüleme ve rapor indirme yetkisi.
+    * `💼 Kasa & Emanet Sorumlusu`: Sandık (Kasa) hareketlerini ve hayırseverleri yönetme ve rapor indirme yetkisi.
+    * `🤝 Saha Gönüllüsü`: Hane ekleme, durum güncelleme, teslimat fotoğrafı yükleme ve kendi zimmet kasasını takip etme yetkisi.
+  * **Kişi Bazlı Özel Modül İzinleri (7 Ayrı Yetki Anahtarı):**
+    * Her bir gönüllü için ayrı ayrı açılıp kapatılabilen özel izin kutucukları eklendi: `✏️ Hane Düzenleme & Silme`, `🗳️ Sandık (Kasa) Yönetimi`, `🤝 Hayırsever Yönetimi`, `👁️ Genel Sandık Görme`, `👁️ Hayırseverleri Görme`, `📜 İşlem Günlüğü (Log) Görme`, `📊 Excel / Rapor İndirme`.
+  * **Tek Tıkla Hızlı Yetki Değiştirme:** Ekip listesindeki her üye kartına tek dokunuşla `👑 Yönetici Yap` / `👤 Gönüllü Yap` ve detaylı `🛡️ Yetki & Düzenle` butonları eklendi.
+
+* **2. 🗑️ Sadece Yönetici İçin İşlem Günlüğü (Log) Silme & Temizleme Merkezi (`Günlük`):**
+  * Yalnızca **Tam Yönetici (`Baş Emanetçi`)** hesabıyla giriş yapıldığında aktif olan 4 kademeli log temizleme sistemi eklendi:
+    * **Tekil Log Silme (`🗑️ Sil`):** Her bir log kartının sağ üst köşesindeki butonla istenen tek bir işlem kaydını silme.
+    * **Aranan / Filtrelenen Logları Silme:** Arama kutusuna yazılan kişi veya işlem türüne ait logları tek tıkla toplu silme.
+    * **Eski Logları Temizleme (`⏳ Son 20 Hariç Sil`):** En güncel 20 kaydı koruyup eski geçmişi temizleme.
+    * **Tüm Günlüğü Sıfırlama (`🧹 Tüm Logları Sil`):** Onay penceresiyle tüm günlük kayıtlarını hem cihazdan hem de Google E-Tablo `Gunluk` sayfasından kalıcı olarak sıfırlama.
+
+* **3. 🛠️ Geniş ve İşlevsel Yönetici Kontrol Paneli (`🛠️ Panel` / `Yönetim`):**
+  * Üst bardaki **`🛠️ Panel`** kısayolundan veya `Gönüllü > 🛠️ Yönetim` sekmesinden erişilen, 6 ana modülden oluşan ve Google E-Tablo ile çift yönlü çalışan kontrol merkezi:
+    1. **📊 Canlı Sistem Özeti & Hızlı Aksiyonlar:** Toplam Hane, Net Sandık, Ekip ve Log sayaçları + tek tıkla E-Tablo eşitleme ve anlık yedek alma.
+    2. **📢 Saha Duyuru & Acil Bildirim Panosu:** Tüm gönüllülerin **Haneler** ana ekranının en üstünde göreceği sabit duyuru yayınlama (`🟢 Bilgilendirme`, `⚠️ Önemli Hatırlatma`, `🚨 Acil Saha Çağrısı`) ve tek tıkla yayından kaldırma.
+    3. **🏛️ Kurum Kimliği, Bölge & Resmi IBAN Ayarları:** Uygulama başlığı, alt başlık, giriş ayet/slogan metni, yeni hane formunda otomatik gelen Varsayılan İl (`Kayseri`) / İlçe, Para Birimi (`₺`) ve Sandık ekranında tek tıkla kopyalanıp WhatsApp ile paylaşılabilen **Resmi Emanet IBAN & Alıcı Adı** tanımlama.
+    4. **📦 Emanet Türü (İhtiyaç Kalemleri) Yönetimi:** Mevcut ihtiyaç kalemlerine yeni özel kategori (emoji + isim, ör. `🍼 Bebek Maması`) ekleme, silme veya varsayılan 10 kategoriye sıfırlama.
+    5. **🛡️ Güvenlik, Genel Yetki & Sistem Politikaları:** `🔒 Bakım (Salt-Okunur) Kilit Modu`, `⚠️ Mükerrer Hane Kayıt Uyarısı`, `👁️ Açılışta Otomatik Mahremiyet Modu`, gönüllülerin Genel Sandık ve Hayırsever görme/düzenleme yetkileri, varsayılan PIN kodu ve otomatik eşitleme süresi (`15 sn / 30 sn / 60 sn`).
+    6. **📸 Kamera Kalitesi, WhatsApp Şablonları & E-Tablo Bakım Merkezi:** Fotoğraf çözünürlük modu (`💎 Ultra HD 1440px`, `✨ Net HD 1280px`, `🌿 Tasarruf 960px`), hane başına maksimum fotoğraf sayısı, WhatsApp teşekkür makbuzu ve paylaşım kartı şablonlarını özelleştirme, E-Tablo bağlantı testi (Ping), tüm tablolar için Excel `.CSV` / `.JSON` dışa aktarım ve teslim edilmiş haneleri toplu temizleme araçları.
+
+
+### 29. 📱 Yukarı - Aşağı Kaydırma (Touch Scroll) Kilitlenmesi Analizi ve Kesin Çözümü
+
+* **Tespit Edilen 3 Kök Sebep (Analiz):**
+  1. **`html, body` Çift Kaydırma Katmanı Çakışması:** CSS içerisinde hem `html` hem de `body` etiketlerine aynı anda `overflow-x: hidden; overflow-y: auto; overscroll-behavior: none !important;` verilmesi, tarayıcıda iç içe iki farklı kaydırma kutusu (nested scroll container) oluşturuyor ve `body` üzerindeki `overscroll-behavior: none` kuralı kaydırma hareketinin ana pencereye (`html` / viewport) iletilmesini kilitliyordu.
+  2. **`{ passive: false }` `touchmove` Dinleyicisinin Dokunmayı İptal Etmesi (`e.preventDefault()`):** Aşağı çekince yenilemeyi (pull-to-refresh) engellemek için eklenen `handlePullTouchMove` fonksiyonu, çift kaydırma katmanı yüzünden `window.pageYOffset` değerini sürekli `0` okuyor ve parmakla yapılan her kaydırma hareketinde `e.preventDefault()` çağırarak Android/iOS dokunmatik kaydırma motorunu (`GestureScrollBegin`) iptal ediyordu.
+  3. **`#root` Üzerindeki `overflow-x-hidden` Sınıfı ve Modal `touch-action: none` Kuralı:** `#root` kapsayıcısındaki `overflow-x-hidden` sınıfı CSS standartları gereği `overflow-y: auto` üreterek üçüncü bir kaydırma katmanı yaratıyordu; ayrıca `body.modal-open` üzerindeki `touch-action: none !important` kuralı alt elemanlara miras geçerek açılır pencerelerin içindeki kaydırmayı da engelliyordu.
+
+* **Uygulanan Kesin Çözüm:**
+  1. **Tekil ve Doğal Kaydırma Ekseni:** `html` üzerindeki `overflow-x` / `overflow-y` kuralları ve `#root` üzerindeki `overflow-x-hidden` sınıfı kaldırıldı; tüm sayfa kaydırması tek bir ana eksende (`body` / `window`) birleştirildi.
+  2. **Donanım Hızlandırmalı (120Hz) Saf CSS Pull-to-Refresh Koruması:** Dokunmatik kaydırmayı bloke eden JavaScript `touchmove` (`{ passive: false }`) dinleyicisi tamamen kaldırıldı. Aşağı çekince sayfa yenileme koruması yalnızca saf CSS (`overscroll-behavior-y: none`) ile sağlanarak tarayıcının kendi akıcı kaydırma motoru serbest bırakıldı.
+  3. **Açılır Pencere (Modal) İçi Kaydırma İyileştirmesi:** `body.modal-open` içerisinden `touch-action: none !important` kaldırıldı (`overflow: hidden !important` korundu); böylece hem ana ekranlarda hem de Hane Detay / Düzenleme pencerelerinde yukarı-aşağı kaydırma kesintisiz ve akıcı hale getirildi.
+
+
+### 30. 🔄 Başka Cihazda Yapılan Değişikliklerin Diğer Cihazlarda Gözükmemesi Sorunu Analizi ve Kesin Çözümü (v3.3)
+
+* **Tespit Edilen 5 Kök Sebep (Analiz):**
+  1. **Mevcut Dağıtılmış Google Apps Script (`ai_studio_code.js`) Sütun ve Tablo Uyumsuzluğu:** E-Tablonuzda dağıtılmış olan mevcut sunucu kodu yalnızca `Haneler`, `Sandik` (7 temel sütun), `Bagiscilar`, `Gonulluler` ve `Gunluk` sayfalarını okuyup yazıyordu. Sonradan eklenen `Devirler` (`transfers`), `Ayarlar` (`settings`) ve Sandık içindeki `category` (Kalem), `giver` (Veren), `receiver` (Alan) alanları mevcut sunucu tarafından kaydedilmediği için diğer cihazlara ulaşmıyordu.
+  2. **`mergeSafeList` İçindeki Eski Önbellek Korumasının Silinenleri Geri Getirmesi:** Cihaz A'da bir kayıt silindiğinde Cihaz B kendi önbelleğinde (`localStorage`) bulunan o kaydı *"yerelde yeni eklenmiş kayıt"* (`localOnly`) zannederek silmiyor ve ilk işlemde tekrar E-Tabloya geri yüklüyordu.
+  3. **Yazma Öncesi Birleştirme (Pull-Before-Push) Eksikliği:** Cihaz B henüz E-Tablodan son verileri çekmeden yeni bir işlem kaydettiğinde, kendi eski önbellek listesini E-Tabloya göndererek Cihaz A'nın az önce eklediği verileri ezebiliyordu.
+  4. **Giriş Ekranında (`!state.currentUser`) Eşitlemenin Kapalı Olması:** Oturum açılmadan önce `syncFromGoogleSheet` çalışmadığı için başka cihazda eklenen yeni gönüllüler veya değiştirilen PIN kodları diğer cihazın giriş ekranında gözükmüyordu.
+  5. **Android WebView `navigator.onLine` ve `fetch` Önbellek Engeli:** Bazı mobil APK WebView ortamlarında `navigator.onLine` yanlışlıkla `false` döndürerek arka plan eşitlemesini durduruyor ve `cache: 'no-store'` eksikliği eski yanıtın okunmasına yol açıyordu.
+
+* **Uygulanan Kesin Çözümler (v3.3 Çoklu Cihaz Canlı Eşitleme Motoru):**
+  1. **Mevcut E-Tablo Scriptiyle %100 Geriye Dönük Uyumlu Taşıyıcı Köprü:** Apps Script kodunuzu yeniden dağıtmanıza gerek kalmadan; tüm **Yönetici Paneli ayarları, duyurular, özel yetkiler, PIN haritası, silinen kayıt ID'leri (`deletedIds`) ve Emanet Devirleri (`transfers`)** mevcut `Bagiscilar` tablosu üzerinden gizli sistem taşıyıcılarıyla (`__HARE_SYS_CONFIG__` ve `__HARE_SYS_TRANSFERS__`), Sandık `kategori/veren/alan` bilgileri ise `[[HM:...]]` meta paketiyle taşınır.
+  2. **Akıllı `dirtyIds` ve Küresel `deletedIds` Takibi:** Yalnızca o cihazda çevrimdışı eklenip henüz sunucuya gönderilmemiş kayıtlar (`hare_dirty_ids`) korunur; başka cihazda düzenlenen veya silinen kayıtlar tüm cihazlarda anında güncellenir ve silinenler bir daha geri gelmez.
+  3. **Yazma Öncesi Otomatik Birleştirme (Pull-Before-Push):** Herhangi bir cihaz E-Tabloya veri yazmadan hemen önce sunucudaki son tabloyu çeker, diğer cihazların eklediği kayıtlarla kendi değişikliğini birleştirir ve öyle kaydeder; hiçbir cihaz diğerinin verisini ezemez.
+  4. **12 Saniyede Bir Hızlı Canlı Eşitleme & Giriş Ekranı Senkronizasyonu:** Otomatik eşitleme süresi 12 saniyeye düşürüldü, sekme geçişlerinde ve giriş ekranında (`!state.currentUser`) otomatik eşitleme aktif edildi.
+
+
+### 31. 🔗 Google E-Tablo Veritabanı Köprüsü Linkinin Tüm Kullanıcılara Otomatik Tanımlanması (Sıfır Elle Giriş)
+
+* **Karşılaşılan Sorun:**
+  * Yönetici `Google E-Tablo Veritabanı Köprüsü` bölümünden yeni bir Apps Script Web App linki girdiğinde, bu link yalnızca yöneticinin kendi cihaz hafızasına (`localStorage`) kaydediliyordu.
+  * Diğer gönüllülerin ve cihazların senkronize olabilmesi için her kullanıcının kendi telefonundan bu script linkini elle girmesi gerekiyordu; girilmediğinde o cihazlarda senkronizasyon oluşmuyordu.
+
+* **Uygulanan Kesin Çözüm (Merkezi Otomatik Köprü Dağıtım Mimarisi):**
+  1. **Merkezi Bulut Köprü İşaretçisi (`activeSheetUrl` Auto-Beacon):**
+     * Yönetici kendi cihazında **Google E-Tablo Veritabanı Köprüsü** (`💾 Kaydet & Tüm Cihazlara Dağıt`) üzerinden bir script linki kaydettiğinde (veya yöneticinin cihazında halihazırda özel bir link kayıtlı olduğunda), bu link `state.settings.activeSheetUrl` olarak hem yeni köprüye hem de uygulamanın fabrika çıkışlı merkezi köprüsüne (`DEFAULT_SHEET_URL`) otomatik olarak işlenir.
+  2. **Diğer Tüm Cihazlarda Sıfır Ayarla Otomatik Algılama ve Geçiş:**
+     * Başka herhangi bir kullanıcı uygulamayı açtığında (henüz PIN ile giriş yapmadan, giriş ekranındayken bile) uygulama merkezi köprüyü kontrol eder, yöneticinin tanımladığı güncel `activeSheetUrl` adresini otomatik algılar, kendi cihaz hafızasına (`hare_sheet_url`) kaydeder ve anında o veritabanı üzerinden senkronize olur.
+     * Hiçbir gönüllünün veya kullanıcının script linki ya da kod girmesine gerek kalmaz.
+  3. **Çift Köprü Yansıtma (Dual-Bridge Mirroring) & Otomatik Onarım (Auto-Heal):**
+     * Yeni bir köprü linki kullanıldığında dahi yapılan değişiklikler arka planda varsayılan köprüye de yansıtılır; ayrıca bir cihazda hatalı/eski bir link kalmışsa sistem otomatik olarak çalışan merkezi köprüye dönüp bağlantıyı kendi kendine onarır.
+  4. **Linki İçine Gömülü Hazır `index.html` İndirme Seçeneği:**
+     * Yönetici paneline **`📥 Bu Köprü Linki Gömülü Hazır index.html İndir`** butonu eklendi; yeni APK veya web yayınlarında güncel linkin doğrudan kodun içine gömülü olduğu hazır dosyayı tek tıkla indirebilirsiniz.
+
+
+### 32. 🤝 Sandık ve Hayırsever Tam Entegrasyonu, Yardım Talebi & Toplu WhatsApp İletişim Merkezi (v3.4)
+
+* **1. 🗳️ Hayırsever Kayıt Alanlarının Sandık (`Emanet Hareketi Ekle`) Bölümüne Taşınması:**
+  * **Hayırsever Sekmesinden Manuel Kayıt Formu Kaldırıldı:** Hayırsever (`bagiscilar`) bölümünde artık ayrı bir kayıt girme formu bulunmaz; bu sekme yalnızca hayırseverlerin bakiyelerini, Hayır Defteri geçmişlerini ve iletişim/yardım çağrısı araçlarını gösterir.
+  * **Sandık > Emanet (Kasa) Hareketi Ekle (`🟢 Teberru / Bağış`) Entegrasyonu:**
+    * Sandıkta **🟢 Teberru (Bağış)** seçildiğinde formda doğrudan **🤝 Hayırsever (Bağışçı) Bilgileri & Entegre Kayıt** alanı açılır.
+    * **Kayıtlı Hayırsever Seçici:** Mevcut bir hayırsever seçildiğinde adı, telefonu, şehri, e-postası ve destek notu otomatik doldurulur; yeni bir hayırsever ise doğrudan `Hayırsever Adı Soyadı`, `Telefon Numarası`, `Şehir / Bölge`, `E-posta` ve `Hayırsever Destek Notu` alanlarıyla girilir.
+    * **Otomatik Eşitleme (`upsertDonorFromBudget` & `ensureDonorsSyncedFromBudget`):** Sandığa teberru kaydedildiği anda hayırsever otomatik olarak **Hayırsever** sekmesinde oluşur (veya mevcutsa bilgileri ve toplam teberru bakiyesi güncellenir).
+    * **Çift Yönlü Bağlantı:** Sandık hareketlerindeki `🤝 Bağışçı (Veren)` rozetine dokunulduğunda doğrudan o kişinin **📖 Hayır Defteri** açılır; Hayırsever kartlarındaki `➕ Emanet / Bağış Gir` butonuna basıldığında ise o hayırsever seçili olarak Sandık ekranına geçilir.
+
+* **2. 💬 Hayırsever İletişim Merkezi: 🤲 Yardım Talebinde Bulun & 📢 Toplu WhatsApp Mesajı At:**
+  * **🤲 Yardım Talebinde Bulun (Acil İhtiyaç Çağrısı):**
+    * Kayıtlı **🚨 Müstacel (Acil)** veya **⏳ Planlanan** hanelerden biri (veya genel saha ihtiyacı) seçildiğinde; ailenin mahremiyetini koruyarak (soyisim ve telefon paylaşmadan) bölgesini, acil ihtiyaç kalemini, hedeflenen destek miktarını ve varsa **Resmi Emanet IBAN** bilgisini içeren hazır WhatsApp yardım talebi mesajı oluşturur.
+    * Her hayırsever kartı üzerindeki **`🤲 Yardım Talebinde Bulun`** butonuyla veya listeden tek dokunuşla ilgili hayırsevere isme özel (`Muhterem [İsim]`) gönderilir.
+  * **📢 Toplu WhatsApp Mesajı & Duyuru Motoru:**
+    * 5 hazır şablon (`🚨 Acil Yardım & İnfak Çağrısı`, `🌿 Cuma / Kandil Tebriği & Hayır Duası`, `📊 Saha Emanet & Faaliyet Teşekkür Mesajı`, `🏦 Resmi Emanet Hesabı (IBAN) Bilgilendirmesi`, `✍️ Özel Mesaj Metni`) sunar.
+    * **İsme Özel Hızlı Gönderim Listesi & Grup Paylaşımı:** Telefonu kayıtlı tüm hayırseverleri seçilebilir listede gösterir; tek tıkla WhatsApp gruplarında paylaşabilir, tüm numaraları kopyalayabilir veya listedeki her hayırsevere isme özel mesajı sırayla gönderebilirsiniz.
