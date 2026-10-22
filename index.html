@@ -100,6 +100,10 @@
     .login-safe-bottom {
       padding-bottom: calc(var(--sys-nav-h) + 2.5rem) !important;
     }
+    input, textarea, select {
+      user-select: auto !important;
+      -webkit-user-select: auto !important;
+    }
   </style>
 </head>
 <body class="bg-slate-100 text-slate-800 antialiased flex justify-center min-h-screen">
@@ -230,8 +234,10 @@
 
     function safePhoto(src) {
       if (!src) return '';
-      var clean = String(src).trim();
-      if (clean.indexOf('data:image/') === 0 || clean.indexOf('https://') === 0) return clean;
+      var clean = String(src).trim().replace(/['"<>\\()]/g, '');
+      if (clean.indexOf('data:image/jpeg') === 0 || clean.indexOf('data:image/png') === 0 || clean.indexOf('data:image/webp') === 0 || clean.indexOf('https://') === 0) {
+        return clean;
+      }
       return '';
     }
 
@@ -949,14 +955,18 @@
     // =========================================================================
     // 🧭 SAYFA GEZİNTİSİ VE ARKA PLAN OTURUM KORUMASI MOTORU
     // =========================================================================
-    function saveActiveSession(user) {
+        function saveActiveSession(user) {
       if (!user) return;
       var serialized = JSON.stringify(user);
       try { sessionStorage.setItem('hare_session_user', serialized); } catch(e) {}
       try { window.name = 'HARE_SESSION:' + serialized; } catch(e) {}
       try { document.cookie = 'hare_session_active=1; path=/; SameSite=Lax'; } catch(e) {}
       try {
-        localStorage.setItem('hare_bg_user', serialized);
+        if (localStorage.getItem('hare_remember_me') === '1') {
+          localStorage.setItem('hare_bg_user', serialized);
+        } else {
+          localStorage.removeItem('hare_bg_user');
+        }
         localStorage.setItem('hare_heartbeat_ts', String(Date.now()));
         localStorage.removeItem('hare_app_closed');
       } catch(e) {}
@@ -1450,9 +1460,9 @@
       if (silent && document.hidden) return;
       if (state.isPushing) return;
 
-      var activeEl = document.activeElement;
+            var activeEl = document.activeElement;
       var isTyping = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA') && !activeEl.readOnly;
-      var isBusyWithForm = state.activeTab === 'yeni' || state.editingAidId || state.editingBudgetId || state.editingDonorId || state.editingMemberId;
+      var isBusyWithForm = state.activeTab === 'yeni' || state.activeTab === 'kasa' || state.activeTab === 'bagiscilar' || state.activeTab === 'ekip' || state.editingAidId || state.editingBudgetId || state.editingDonorId || state.editingMemberId || state.changingPin;
 
       if (!silent && !isTyping && !isBusyWithForm) {
         state.isSyncing = true;
@@ -1749,8 +1759,10 @@
           return Object.assign({}, m, { pin: String(savedPin).trim() });
         });
 
-        var bodyPayload = {
+      var bodyPayload = {
           token: API_SECRET,
+          callerId: state.currentUser ? String(state.currentUser.id).trim() : '',
+          callerName: state.currentUser ? String(state.currentUser.name).trim() : '',
           aids: aidsForServer,
           budget: budgetForServer,
           transfers: transfersForServer,
